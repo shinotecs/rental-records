@@ -1475,51 +1475,51 @@ async function onMSAuthSuccess(account) {
 }
 
 window.onload = async function() {
-  // MSAL v3: initialize() を必ず最初に完了させる
-  try {
-    await msalInstance.initialize();
-  } catch(e) {
-    console.error('MSAL initialize error:', e);
-  }
-
-  // リダイレクト後のトークン処理（3秒タイムアウト付き・F5フリーズ防止）
-  try {
-    const redirectPromise = msalInstance.handleRedirectPromise();
-    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3000));
-    const redirectResult = await Promise.race([redirectPromise, timeoutPromise]);
-    if (redirectResult) {
-      spToken = redirectResult.accessToken;
-    }
-  } catch(e) {
-    console.warn('handleRedirectPromise error:', e);
-  }
-
-  // ローディング後: 既存セッションがあれば自動ログイン、なければサインイン画面
-  setTimeout(async () => {
+  // 全体を5秒でタイムアウト（フリーズ防止）
+  const showLogin = () => {
     document.getElementById('loading-screen').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'block';
+  };
+  const globalTimeout = setTimeout(showLogin, 5000);
+
+  try {
+    // initialize に2秒タイムアウト
+    await Promise.race([
+      msalInstance.initialize(),
+      new Promise(resolve => setTimeout(resolve, 2000))
+    ]);
+
+    // handleRedirectPromise に2秒タイムアウト
+    try {
+      const redirectResult = await Promise.race([
+        msalInstance.handleRedirectPromise(),
+        new Promise(resolve => setTimeout(() => resolve(null), 2000))
+      ]);
+      if (redirectResult) spToken = redirectResult.accessToken;
+    } catch(e) { console.warn('redirect error:', e); }
+
+    // 既存アカウントがあればサイレント認証を試みる
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
       try {
-        // サイレント取得も5秒タイムアウト
-        const silentPromise = msalInstance.acquireTokenSilent({
-          scopes: SP_SCOPES,
-          account: accounts[0],
-          forceRefresh: false,
-        });
-        const silentTimeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 5000)
-        );
-        const result = await Promise.race([silentPromise, silentTimeout]);
+        const result = await Promise.race([
+          msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0], forceRefresh: false }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+        ]);
         spToken = result.accessToken;
+        clearTimeout(globalTimeout);
+        document.getElementById('loading-screen').style.display = 'none';
         await onMSAuthSuccess(accounts[0]);
         return;
-      } catch(e) {
-        console.warn('Silent auth failed, showing login screen:', e);
-      }
+      } catch(e) { console.warn('silent auth failed:', e); }
     }
-    // 未サインイン or サイレント失敗 → サインイン画面を表示
-    document.getElementById('login-screen').style.display = 'block';
-  }, 1400);
+  } catch(e) {
+    console.error('MSAL init error:', e);
+  }
+
+  // ここまで来たらサインイン画面を表示
+  clearTimeout(globalTimeout);
+  showLogin();
 };
 
 
