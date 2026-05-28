@@ -285,8 +285,7 @@ tr:hover td { background: var(--gray-50); }
 
 /* ===== LOGIN ===== */
 #login-screen {
-  position: fixed; inset: 0; background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
-  display: flex; align-items: center; justify-content: center; z-index: 9998;
+  position: fixed; inset: 0; z-index: 9998;
 }
 .login-card {
   background: white; border-radius: var(--radius-lg); padding: 32px; width: 360px;
@@ -323,29 +322,23 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
 </div>
 
-<!-- Login Screen -->
+<!-- Login Screen (Microsoft認証中の待機画面) -->
 <div id="login-screen" style="display:none;">
-  <div class="login-card">
-    <div class="login-logo">🏥 記録管理システム</div>
-    <div class="login-sub">福祉用具　記録管理</div>
-    <div class="role-select">
-      <button class="role-btn active" onclick="selectRole('営業',this)">💼 営業</button>
-      <button class="role-btn" onclick="selectRole('事務',this)">📋 事務</button>
-      <button class="role-btn" onclick="selectRole('管理者',this)">🔑 管理者</button>
-    </div>
-    <div class="login-field">
-      <label>担当者名</label>
-      <input id="login-name" type="text" placeholder="例：篠　一郎" list="staff-list">
-      <datalist id="staff-list"></datalist>
-    </div>
-    <div class="login-field">
-      <label>パスワード</label>
-      <input id="login-pass" type="password" placeholder="パスワード">
-    </div>
-    <button class="login-btn" onclick="doLogin()">ログイン</button>
-    <div class="login-hint">
-      <strong>デモ用パスワード：</strong><br>
-      営業・事務: 1234 ／ 管理者・社長: admin
+  <div style="position:fixed;inset:0;background:linear-gradient(135deg,var(--primary-dark),var(--primary));display:flex;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:12px;padding:40px;text-align:center;width:360px;box-shadow:0 4px 24px rgba(0,0,0,0.2);">
+      <div style="font-size:40px;margin-bottom:12px;">🏥</div>
+      <div style="font-size:20px;font-weight:700;color:var(--primary);margin-bottom:4px;">記録管理システム</div>
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:24px;">福祉用具　記録管理</div>
+      <div style="font-size:13px;color:var(--gray-600);margin-bottom:20px;">Microsoftアカウントでサインインしています...</div>
+      <div style="width:100%;height:4px;background:var(--gray-200);border-radius:2px;overflow:hidden;">
+        <div style="height:100%;background:var(--primary);border-radius:2px;animation:loadBar 1.5s ease-in-out infinite;"></div>
+      </div>
+      <div style="margin-top:20px;">
+        <button onclick="doMSLogin()" style="width:100%;padding:11px;background:var(--primary);color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
+          🔑 Microsoftでサインイン
+        </button>
+      </div>
+      <div id="login-error" style="margin-top:12px;font-size:12px;color:var(--danger);display:none;"></div>
     </div>
   </div>
 </div>
@@ -399,7 +392,7 @@ tr:hover td { background: var(--gray-50); }
     <div class="page-header">
       <div class="page-title">📊 ダッシュボード</div>
       <div class="actions">
-        <button class="btn btn-primary" onclick="openAddUserModal()">＋ 利用者追加</button>
+        <button class="btn btn-primary" onclick="openAddUserModal()" id="btn-add-user-dash">＋ 利用者追加</button>
       </div>
     </div>
     <div class="stats-grid" id="dash-stats"></div>
@@ -439,7 +432,7 @@ tr:hover td { background: var(--gray-50); }
     <div class="page-header">
       <div class="page-title">🏠 在宅利用者</div>
       <div class="actions">
-        <button class="btn btn-primary" onclick="openAddUserModal('在宅')">＋ 利用者追加</button>
+        <button class="btn btn-primary" onclick="openAddUserModal('在宅')" id="btn-add-home">＋ 利用者追加</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -475,7 +468,7 @@ tr:hover td { background: var(--gray-50); }
     <div class="page-header">
       <div class="page-title">🏢 施設利用者</div>
       <div class="actions">
-        <button class="btn btn-primary" onclick="openAddUserModal('施設')">＋ 利用者追加</button>
+        <button class="btn btn-primary" onclick="openAddUserModal('施設')" id="btn-add-facility">＋ 利用者追加</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -511,7 +504,7 @@ tr:hover td { background: var(--gray-50); }
     <div class="page-header">
       <div class="page-title">🏭 法人・業者</div>
       <div class="actions">
-        <button class="btn btn-primary" onclick="openAddUserModal('法人')">＋ 利用者追加</button>
+        <button class="btn btn-primary" onclick="openAddUserModal('法人')" id="btn-add-corporate">＋ 利用者追加</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -640,7 +633,7 @@ tr:hover td { background: var(--gray-50); }
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>名前</th><th>役割</th><th>担当区分</th><th>登録日</th><th>操作</th></tr></thead>
+        <thead><tr><th>名前</th><th>メールアドレス</th><th>役割</th><th>権限設定</th><th>担当区分</th><th>登録日</th><th>操作</th></tr></thead>
         <tbody id="staff-table-body"></tbody>
       </table>
     </div>
@@ -939,13 +932,17 @@ tr:hover td { background: var(--gray-50); }
     <div class="modal-body">
       <div class="form-grid">
         <div class="form-group full">
-          <label>名前<span class="req">*</span></label>
-          <input id="st-name" type="text" placeholder="例：篠　一郎">
+          <label>氏名<span class="req">*</span></label>
+          <input id="st-fullname" type="text" placeholder="例：篠 裕介">
+        </div>
+        <div class="form-group full">
+          <label>Microsoftメールアドレス<span class="req">*</span></label>
+          <input id="st-email" type="email" placeholder="例：y.shino@shinotecs.onmicrosoft.com">
         </div>
         <div class="form-group">
           <label>役割</label>
           <select id="st-role">
-            <option>営業</option><option>事務</option><option>管理者</option><option>社長</option>
+            <option>営業</option><option>総務</option><option>管理者</option><option>社長</option>
           </select>
         </div>
         <div class="form-group">
@@ -953,10 +950,6 @@ tr:hover td { background: var(--gray-50); }
           <select id="st-area">
             <option>在宅・施設</option><option>在宅のみ</option><option>施設のみ</option><option>法人・業者</option><option>全担当</option>
           </select>
-        </div>
-        <div class="form-group full">
-          <label>パスワード</label>
-          <input id="st-pass" type="text" placeholder="デフォルト: 1234">
         </div>
       </div>
     </div>
@@ -1291,12 +1284,12 @@ function updateSPStatus(connected) {
 // ======================== DATA STORE ========================
 let DB = {
   staff: [
-    {id:1,name:'篠',role:'営業',area:'在宅・施設',pass:'1234',created:'2026-01-01'},
-    {id:2,name:'小林',role:'営業',area:'在宅・施設',pass:'1234',created:'2026-01-01'},
-    {id:3,name:'青池',role:'営業',area:'在宅・施設',pass:'1234',created:'2026-01-01'},
-    {id:4,name:'茂木',role:'営業',area:'在宅・施設',pass:'1234',created:'2026-01-01'},
-    {id:5,name:'管理者',role:'管理者',area:'全担当',pass:'admin',created:'2026-01-01'},
-    {id:6,name:'社長',role:'社長',area:'全担当',pass:'admin',created:'2026-01-01'},
+    {id:1,name:'篠',fullname:'篠 裕介',email:'y.shino@shinotecs.onmicrosoft.com',role:'社長',area:'全担当',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
+    {id:2,name:'小林',fullname:'小林 裕明',email:'h.kobayashi@shinotecs.onmicrosoft.com',role:'所長',area:'在宅・施設',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
+    {id:3,name:'青池',fullname:'青池 良太',email:'r.aoike@shinotecs.onmicrosoft.com',role:'営業',area:'在宅・施設',canEditOrder:true,canEditUser:false,canAdmin:false,created:'2026-01-01'},
+    {id:4,name:'茂木',fullname:'茂木 はるな',email:'h.moteki@shinotecs.onmicrosoft.com',role:'営業',area:'在宅・施設',canEditOrder:true,canEditUser:false,canAdmin:false,created:'2026-01-01'},
+    {id:5,name:'杉山',fullname:'杉山 郁美',email:'i.sugiyama@shinotecs.onmicrosoft.com',role:'総務',area:'全担当',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
+    {id:6,name:'小森谷',fullname:'小森谷 恵',email:'m.komoriya@shinotecs.onmicrosoft.com',role:'総務',area:'全担当',canEditOrder:true,canEditUser:false,canAdmin:false,created:'2026-01-01'},
   ],
   masters: {
     statuses: ['レンタル','デモ中','デモ返却','終了','入院中','【新規】利用中'],
@@ -1345,6 +1338,7 @@ let DB = {
 // ======================== STATE ========================
 let currentUser = null;
 let currentRole = null;
+let currentPerms = { canEditOrder: false, canEditUser: false, canAdmin: false };
 let editingId = null;
 let editingType = null;
 let currentFilters = {home:{search:'',status:'',staff:''},facility:{search:'',status:'',staff:''},corporate:{search:'',status:'',staff:''},orders:{search:'',category:'',staff:'',tab:'all'},memos:{search:'',category:'',staff:''},sales:{search:'',status:''}};
@@ -1353,6 +1347,82 @@ const PAGE_SIZE = 15;
 let sortState = {};
 
 // ======================== INIT ========================
+// ======================== PERMISSION UI ========================
+function applyPermissionUI() {
+  // 利用者追加ボタン（canEditUser が必要）
+  ['btn-add-user-dash','btn-add-home','btn-add-facility','btn-add-corporate'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = currentPerms.canEditUser ? '' : 'none';
+  });
+}
+
+// 権限を保存（ローカルのDBを更新）
+function saveStaffPerms(staffId, field, value) {
+  const s = DB.staff.find(x => x.id === staffId);
+  if (!s) return;
+  s[field] = value;
+  // 自分自身の権限が変わった場合はcurrentPermsも更新
+  if (s.email && s.email.toLowerCase() === (msalInstance.getAllAccounts()[0]?.username||'').toLowerCase()) {
+    currentPerms.canEditOrder = s.canEditOrder;
+    currentPerms.canEditUser  = s.canEditUser;
+    currentPerms.canAdmin     = s.canAdmin;
+    applyPermissionUI();
+    document.getElementById('admin-menu').style.display = currentPerms.canAdmin ? 'block' : 'none';
+  }
+  showToast('権限を更新しました', 'success');
+}
+
+// Microsoftアカウント → システム社員マスタ のマッピング
+function getStaffByEmail(email) {
+  if (!email) return null;
+  return DB.staff.find(s => s.email && s.email.toLowerCase() === email.toLowerCase()) || null;
+}
+
+// Microsoftサインインボタン押下
+async function doMSLogin() {
+  document.getElementById('login-error').style.display = 'none';
+  try {
+    const result = await msalInstance.acquireTokenPopup({
+      scopes: SP_SCOPES,
+      prompt: 'select_account',
+    });
+    spToken = result.accessToken;
+    await onMSAuthSuccess(result.account);
+  } catch(e) {
+    if (e.errorCode !== 'user_cancelled') {
+      const errEl = document.getElementById('login-error');
+      errEl.textContent = 'サインインに失敗しました: ' + (e.errorMessage || e.message || e.errorCode);
+      errEl.style.display = 'block';
+    }
+  }
+}
+
+// 認証成功後の処理
+async function onMSAuthSuccess(account) {
+  const email = account.username;
+  const staff = getStaffByEmail(email);
+  if (!staff) {
+    const errEl = document.getElementById('login-error');
+    errEl.textContent = 'このアカウント（' + email + '）はシステムに登録されていません。管理者に連絡してください。';
+    errEl.style.display = 'block';
+    return;
+  }
+  currentUser = staff.name;
+  currentRole = staff.role;
+  // 権限フラグをセット
+  currentPerms = {
+    canEditOrder: staff.canEditOrder || false,
+    canEditUser:  staff.canEditUser  || false,
+    canAdmin:     staff.canAdmin     || false,
+  };
+  document.getElementById('current-user').textContent = staff.fullname || staff.name;
+  document.getElementById('current-role').textContent = currentRole;
+  document.getElementById('login-screen').style.display = 'none';
+  // 管理者メニューの表示制御
+  document.getElementById('admin-menu').style.display = currentPerms.canAdmin ? 'block' : 'none';
+  await initApp();
+}
+
 window.onload = async function() {
   // MSAL v3: initialize() を必ず最初に完了させる
   try {
@@ -1361,65 +1431,54 @@ window.onload = async function() {
     console.error('MSAL initialize error:', e);
   }
 
-  // リダイレクト後のトークン処理（GitHub Pages経由の場合）
+  // リダイレクト後のトークン処理
   try {
     const redirectResult = await msalInstance.handleRedirectPromise();
     if (redirectResult) {
-      // リダイレクトで取得できたトークンをキャッシュ
       spToken = redirectResult.accessToken;
-      console.log('Redirect auth success:', redirectResult.account?.username);
     }
   } catch(e) {
     console.warn('handleRedirectPromise error:', e);
   }
 
-  // ローディング画面を閉じてログイン画面を表示
-  setTimeout(() => {
+  // ローディング後: 既存セッションがあれば自動ログイン、なければサインイン画面
+  setTimeout(async () => {
     document.getElementById('loading-screen').style.display = 'none';
-    document.getElementById('login-screen').style.display = 'flex';
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      // 既にサインイン済み → サイレントでトークン取得して自動ログイン
+      try {
+        const result = await msalInstance.acquireTokenSilent({
+          scopes: SP_SCOPES,
+          account: accounts[0],
+        });
+        spToken = result.accessToken;
+        await onMSAuthSuccess(accounts[0]);
+        return;
+      } catch(e) {
+        console.warn('Silent auth failed, showing login screen:', e);
+      }
+    }
+    // 未サインイン or サイレント失敗 → サインイン画面を表示
+    document.getElementById('login-screen').style.display = 'block';
   }, 1400);
 };
 
-let selectedRole = '営業';
-function selectRole(role, btn) {
-  selectedRole = role;
-  document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-}
-
-function doLogin() {
-  const name = document.getElementById('login-name').value.trim();
-  const pass = document.getElementById('login-pass').value.trim();
-  if (!name) { showToast('担当者名を入力してください', 'error'); return; }
-  const staff = DB.staff.find(s => s.name === name);
-  const adminRoles = ['管理者','社長'];
-  const isAdmin = adminRoles.includes(selectedRole);
-  const expectedPass = isAdmin ? 'admin' : '1234';
-  if (pass !== expectedPass && pass !== (staff?.pass || '')) {
-    showToast('パスワードが違います', 'error'); return;
-  }
-  currentUser = name;
-  currentRole = staff ? staff.role : selectedRole;
-  document.getElementById('current-user').textContent = name;
-  document.getElementById('current-role').textContent = currentRole;
-  document.getElementById('login-screen').style.display = 'none';
-  if (!adminRoles.includes(currentRole)) {
-    document.getElementById('admin-menu').style.display = 'none';
-  } else {
-    document.getElementById('admin-menu').style.display = 'block';
-  }
-  initApp();
-}
-
 function logout() {
-  currentUser = null; currentRole = null;
-  document.getElementById('login-screen').style.display = 'flex';
+  // Microsoftアカウントからもサインアウト
+  const accounts = msalInstance.getAllAccounts();
+  currentUser = null; currentRole = null; spToken = null;
+  if (accounts.length > 0) {
+    msalInstance.logoutPopup({ account: accounts[0] }).catch(() => {});
+  }
+  document.getElementById('login-screen').style.display = 'block';
   showToast('ログアウトしました', 'success');
 }
 
 async function initApp() {
   populateStaffDatalist();
   populateProductDatalist();
+  applyPermissionUI();
   showPage('dashboard');
   renderDashboard();
   renderStaffTable();
@@ -1597,7 +1656,7 @@ function renderUsers(cat) {
   const start = (currentPages[cat]-1)*PAGE_SIZE;
   const pageData = data.slice(start, start+PAGE_SIZE);
 
-  const canEdit = ['管理者','社長'].includes(currentRole);
+  const canEdit = currentPerms.canEditUser;
   document.getElementById(bodyId).innerHTML = pageData.map(u=>`
     <tr>
       <td>${u.id}</td>
@@ -1683,7 +1742,7 @@ function renderOrders() {
   const total = data.length;
   const start = (currentPages.orders-1)*PAGE_SIZE;
   const pageData = data.slice(start, start+PAGE_SIZE);
-  const canEdit = ['管理者','社長'].includes(currentRole);
+  const canEdit = currentPerms.canEditOrder;
 
   document.getElementById('orders-body').innerHTML = pageData.map(o=>{
     const u = DB.users.find(u=>u.id===o.userId);
@@ -1727,7 +1786,7 @@ function renderMemos() {
   const total = data.length;
   const start = (currentPages.memos-1)*PAGE_SIZE;
   const pageData = data.slice(start, start+PAGE_SIZE);
-  const canEdit = ['管理者','社長'].includes(currentRole);
+  const canEdit = currentPerms.canEditOrder;
 
   document.getElementById('memos-body').innerHTML = pageData.map(m=>{
     const u = DB.users.find(u=>u.id===m.userId);
@@ -1766,7 +1825,7 @@ function renderSales() {
   const total = data.length;
   const start = (currentPages.sales-1)*PAGE_SIZE;
   const pageData = data.slice(start, start+PAGE_SIZE);
-  const canEdit = ['管理者','社長'].includes(currentRole);
+  const canEdit = currentPerms.canEditOrder;
 
   document.getElementById('sales-body').innerHTML = pageData.map(s=>{
     const u = DB.users.find(u=>u.id===s.userId);
@@ -1795,7 +1854,7 @@ function openDetail(userId) {
   const userOrders = DB.orders.filter(o=>o.userId===userId);
   const userMemos = DB.memos.filter(m=>m.userId===userId).sort((a,b)=>b.date.localeCompare(a.date));
   const userSales = DB.sales.filter(s=>s.userId===userId);
-  const canEdit = ['管理者','社長'].includes(currentRole);
+  const canEdit = currentPerms.canEditUser;
 
   document.getElementById('detail-title').textContent = `👤 ${u.name}（${u.category}・${u.status}）`;
   document.getElementById('detail-edit-btn').style.display = canEdit ? 'inline-flex':'none';
@@ -2034,7 +2093,7 @@ async function saveUser() {
 }
 
 function deleteUser(id) {
-  if (!['管理者','社長'].includes(currentRole)) { showToast('権限がありません', 'error'); return; }
+  if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
   if (!confirm('この利用者を削除しますか？関連するメモ・受注も削除されます。')) return;
   DB.users = DB.users.filter(u=>u.id!==id);
   DB.memos = DB.memos.filter(m=>m.userId!==id);
@@ -2108,7 +2167,7 @@ async function saveMemo() {
 }
 
 function deleteMemo(id) {
-  if (!['管理者','社長'].includes(currentRole)) { showToast('権限がありません', 'error'); return; }
+  if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
   if (!confirm('このメモを削除しますか？')) return;
   DB.memos = DB.memos.filter(m=>m.id!==id);
   showToast('メモを削除しました', 'success');
@@ -2217,7 +2276,7 @@ function openEditOrder(id) {
 }
 
 function deleteOrder(id) {
-  if (!['管理者','社長'].includes(currentRole)) { showToast('権限がありません', 'error'); return; }
+  if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
   if (!confirm('この受注を削除しますか？')) return;
   DB.orders = DB.orders.filter(o=>o.id!==id);
   showToast('受注を削除しました', 'success');
@@ -2290,7 +2349,7 @@ function openEditSale(id) {
 }
 
 function deleteSale(id) {
-  if (!['管理者','社長'].includes(currentRole)) { showToast('権限がありません', 'error'); return; }
+  if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
   if (!confirm('この販売記録を削除しますか？')) return;
   DB.sales = DB.sales.filter(s=>s.id!==id);
   showToast('販売記録を削除しました', 'success');
@@ -2299,7 +2358,7 @@ function deleteSale(id) {
 
 // ======================== SETTINGS ========================
 function renderSettings() {
-  const canEdit = ['管理者','社長'].includes(currentRole);
+  const canEdit = currentPerms.canAdmin;
   const masterKeys = [
     {key:'facilities',label:'🏢 施設一覧'},
     {key:'kyotaku',label:'🏠 居宅一覧'},
@@ -2353,14 +2412,38 @@ function removeMasterItem(key, idx) {
 
 // ======================== STAFF ========================
 function renderStaffTable() {
+  const canEdit = currentPerms.canAdmin;
+  const roleColors = {'社長':'badge-purple','所長':'badge-purple','管理者':'badge-purple','総務':'badge-blue','営業':'badge-green','一般':'badge-gray'};
+
   document.getElementById('staff-table-body').innerHTML = DB.staff.map(s=>`
     <tr>
-      <td><strong>${s.name}</strong></td>
-      <td><span class="badge ${s.role==='管理者'||s.role==='社長'?'badge-purple':s.role==='事務'?'badge-blue':'badge-green'}">${s.role}</span></td>
+      <td><strong>${s.fullname||s.name}</strong></td>
+      <td style="font-size:12px;color:var(--gray-600);">${s.email||'-'}</td>
+      <td><span class="badge ${roleColors[s.role]||'badge-gray'}">${s.role}</span></td>
+      <td>
+        ${canEdit ? `
+        <label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" ${s.canEditOrder?'checked':''} onchange="saveStaffPerms(${s.id},'canEditOrder',this.checked)">
+          受注編集
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" ${s.canEditUser?'checked':''} onchange="saveStaffPerms(${s.id},'canEditUser',this.checked)">
+          利用者編集
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" ${s.canAdmin?'checked':''} onchange="saveStaffPerms(${s.id},'canAdmin',this.checked)">
+          管理者
+        </label>
+        ` : `
+        <span style="font-size:12px;color:var(--gray-500);">
+          ${s.canEditOrder?'✅受注編集 ':''}${s.canEditUser?'✅利用者編集 ':''}${s.canAdmin?'✅管理者':''}
+        </span>
+        `}
+      </td>
       <td>${s.area}</td>
       <td>${s.created}</td>
       <td class="td-actions">
-        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteStaff(${s.id})">🗑</button>
+        ${canEdit?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteStaff(${s.id})" title="削除">🗑</button>`:''}
       </td>
     </tr>
   `).join('');
@@ -2376,13 +2459,21 @@ function openAddStaffModal() {
 }
 
 function saveStaff() {
-  const name = document.getElementById('st-name').value.trim();
-  if (!name) { showToast('名前は必須です', 'error'); return; }
-  if (DB.staff.find(s=>s.name===name)) { showToast('既に登録されています', 'error'); return; }
+  const fullname = document.getElementById('st-fullname').value.trim();
+  const email = document.getElementById('st-email').value.trim().toLowerCase();
+  if (!fullname) { showToast('氏名は必須です', 'error'); return; }
+  if (!email) { showToast('メールアドレスは必須です', 'error'); return; }
+  if (DB.staff.find(s=>s.email&&s.email.toLowerCase()===email)) { showToast('このメールアドレスは既に登録されています', 'error'); return; }
+  // 表示名（姓のみ）を自動生成
+  const name = fullname.split(/[　 ]/)[0];
+  const role = document.getElementById('st-role').value;
+  const isAdmin = ['社長','所長','管理者'].includes(role);
   DB.staff.push({
-    id: Date.now(), name, role: document.getElementById('st-role').value,
+    id: Date.now(), name, fullname, email, role,
     area: document.getElementById('st-area').value,
-    pass: document.getElementById('st-pass').value || '1234',
+    canEditOrder: isAdmin,
+    canEditUser: isAdmin,
+    canAdmin: isAdmin,
     created: new Date().toISOString().slice(0,10),
   });
   closeModal('modal-staff');
@@ -2391,7 +2482,7 @@ function saveStaff() {
 }
 
 function deleteStaff(id) {
-  if (!['管理者','社長'].includes(currentRole)) { showToast('権限がありません', 'error'); return; }
+  if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
   if (!confirm('この社員を削除しますか？')) return;
   DB.staff = DB.staff.filter(s=>s.id!==id);
   renderStaffTable();
