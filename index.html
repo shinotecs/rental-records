@@ -1825,8 +1825,7 @@ function printChecklist() {
         <td style="font-size:7.5pt;max-width:80mm;">${orderText}</td>
         <td style="text-align:center;"><span class="${tantouClass}">${u.tantou||'－'}</span></td>
         <td style="text-align:center;"><span class="${jimuClass}">${u.jimu||'－'}</span></td>
-        <td style="font-size:7.5pt;color:#555;">${latestMemo ? latestMemo.date+'　'+latestMemo.content.slice(0,25).replace(/
-/g,' ')+'…' : '－'}</td>
+        <td style="font-size:7.5pt;color:#555;">${latestMemo ? latestMemo.date+'　'+latestMemo.content.slice(0,25).replace(/\n/g,' ')+'…' : '－'}</td>
         <td><span class="memo-line"></span></td>
       </tr>`;
     }).join('');
