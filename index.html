@@ -777,12 +777,19 @@ tr:hover td { background: var(--gray-50); }
   <div class="modal" style="max-width:800px;">
     <div class="modal-header">
       <div class="modal-title" id="detail-title">利用者詳細</div>
-      <div style="display:flex;gap:6px;">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <div style="display:flex;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden;">
+          <button id="detail-tab-info" onclick="switchDetailTab('info')"
+            style="padding:5px 12px;font-size:12px;border:none;background:var(--primary);color:white;cursor:pointer;font-family:inherit;">📋 詳細</button>
+          <button id="detail-tab-log" onclick="switchDetailTab('log')"
+            style="padding:5px 12px;font-size:12px;border:none;background:white;color:var(--gray-600);cursor:pointer;font-family:inherit;">🕐 更新履歴</button>
+        </div>
         <button class="btn btn-outline btn-sm" id="detail-edit-btn" onclick="editCurrentUser()">✏️ 編集</button>
         <button class="btn btn-outline btn-sm" onclick="closeModal('modal-detail')">✕ 閉じる</button>
       </div>
     </div>
     <div class="modal-body" id="detail-body"></div>
+    <div class="modal-body" id="detail-log-body" style="display:none;"></div>
   </div>
 </div>
 
@@ -1384,6 +1391,7 @@ let DB = {
   ],
   nextIds: {user:9,memo:8,order:10,sale:2},
   trash: [], // ゴミ箱（削除済みデータ、90日保存）
+  updateLogs: [], // 更新履歴（誰がいつ更新したか）
 };
 
 // ======================== STATE ========================
@@ -1474,31 +1482,30 @@ async function onMSAuthSuccess(account) {
   await initApp();
 }
 
-window.onload = async function() {
-  // 全体を5秒でタイムアウト（フリーズ防止）
-  const showLogin = () => {
+window.onload = function() {
+  // ① まずローディングを消してサインイン画面を即表示（絶対に固まらない）
+  setTimeout(() => {
     document.getElementById('loading-screen').style.display = 'none';
     document.getElementById('login-screen').style.display = 'block';
-  };
-  const globalTimeout = setTimeout(showLogin, 5000);
+    // ② バックグラウンドでMSAL初期化を試みる（成功すれば自動ログイン）
+    initMSALBackground();
+  }, 1200);
+};
 
+async function initMSALBackground() {
   try {
-    // initialize に2秒タイムアウト
     await Promise.race([
       msalInstance.initialize(),
-      new Promise(resolve => setTimeout(resolve, 2000))
+      new Promise(resolve => setTimeout(resolve, 3000))
     ]);
-
-    // handleRedirectPromise に2秒タイムアウト
     try {
-      const redirectResult = await Promise.race([
+      await Promise.race([
         msalInstance.handleRedirectPromise(),
-        new Promise(resolve => setTimeout(() => resolve(null), 2000))
+        new Promise(resolve => setTimeout(resolve, 2000))
       ]);
-      if (redirectResult) spToken = redirectResult.accessToken;
-    } catch(e) { console.warn('redirect error:', e); }
+    } catch(e) {}
 
-    // 既存アカウントがあればサイレント認証を試みる
+    // 既存セッションがあれば自動ログイン
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
       try {
@@ -1507,20 +1514,55 @@ window.onload = async function() {
           new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
         ]);
         spToken = result.accessToken;
-        clearTimeout(globalTimeout);
-        document.getElementById('loading-screen').style.display = 'none';
-        await onMSAuthSuccess(accounts[0]);
-        return;
-      } catch(e) { console.warn('silent auth failed:', e); }
+        // サインイン画面がまだ表示中なら自動でログイン処理へ
+        if (document.getElementById('login-screen').style.display !== 'none') {
+          await onMSAuthSuccess(accounts[0]);
+        }
+      } catch(e) {
+        console.warn('Auto login failed, manual sign-in required:', e);
+      }
     }
   } catch(e) {
-    console.error('MSAL init error:', e);
+    console.warn('MSAL background init failed:', e);
   }
+}
 
-  // ここまで来たらサインイン画面を表示
-  clearTimeout(globalTimeout);
-  showLogin();
-};
+
+// ======================== 更新履歴 ========================
+function addUpdateLog(type, targetId, targetName, action) {
+  DB.updateLogs.unshift({
+    type,       // 'user'|'memo'|'order'|'sale'
+    targetId,
+    targetName,
+    action,     // '新規登録'|'更新'|'削除'
+    updatedBy: currentUser || '-',
+    updatedByFull: DB.staff.find(s=>s.name===currentUser)?.fullname || currentUser || '-',
+    updatedAt: new Date().toISOString(),
+  });
+  // 最新500件のみ保持
+  if (DB.updateLogs.length > 500) DB.updateLogs = DB.updateLogs.slice(0, 500);
+}
+
+function renderUpdateLogs(userId) {
+  const logs = DB.updateLogs.filter(l => l.targetId === userId);
+  if (logs.length === 0) {
+    return '<div style="padding:16px;color:var(--gray-500);font-size:13px;">更新履歴がありません</div>';
+  }
+  return logs.map(l => {
+    const dt = new Date(l.updatedAt);
+    const dateStr = dt.getFullYear() + '/' + String(dt.getMonth()+1).padStart(2,'0') + '/' +
+      String(dt.getDate()).padStart(2,'0') + ' ' +
+      String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
+    const actionColor = l.action==='新規登録'?'badge-green':l.action==='削除'?'badge-red':'badge-blue';
+    const typeLabel = {user:'利用者',memo:'メモ',order:'受注',sale:'販売'}[l.type]||l.type;
+    return `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 14px;border-bottom:1px solid var(--gray-100);font-size:12px;">
+        <div style="min-width:120px;color:var(--gray-600);">${dateStr}</div>
+        <div style="min-width:70px;font-weight:500;">${l.updatedByFull}</div>
+        <div><span class="badge ${actionColor}" style="font-size:10px;">${typeLabel}${l.action}</span></div>
+      </div>`;
+  }).join('');
+}
 
 
 // ======================== ゴミ箱 ========================
@@ -2366,8 +2408,30 @@ function openDetail(userId) {
     </div>
   `;
   openModal('modal-detail');
+  // タブをデフォルト（詳細）に戻す
+  switchDetailTab('info');
   // 初期表示
   setTimeout(() => renderDetailOrders('all'), 50);
+}
+
+
+function switchDetailTab(tab) {
+  const infoBody = document.getElementById('detail-body');
+  const logBody = document.getElementById('detail-log-body');
+  const tabInfo = document.getElementById('detail-tab-info');
+  const tabLog = document.getElementById('detail-tab-log');
+  if (tab === 'info') {
+    infoBody.style.display = ''; logBody.style.display = 'none';
+    tabInfo.style.background = 'var(--primary)'; tabInfo.style.color = 'white';
+    tabLog.style.background = 'white'; tabLog.style.color = 'var(--gray-600)';
+  } else {
+    infoBody.style.display = 'none'; logBody.style.display = '';
+    tabLog.style.background = 'var(--primary)'; tabLog.style.color = 'white';
+    tabInfo.style.background = 'white'; tabInfo.style.color = 'var(--gray-600)';
+    // 履歴を描画
+    const userId = window._detailUserId;
+    logBody.innerHTML = renderUpdateLogs(userId);
+  }
 }
 
 function editCurrentUser() {
@@ -2501,16 +2565,19 @@ async function saveUser() {
       await updateListItem('利用者マスタ', u.spId, spFields);
     }
     Object.assign(u, data);
+    addUpdateLog('user', u.id, u.name, '更新');
     showToast('利用者情報を更新しました', 'success');
   } else {
     const result = await addListItem('利用者マスタ', spFields);
     if (result) {
       data.id = result.id; data.spId = result.id;
       DB.users.push(data);
+      addUpdateLog('user', data.id, data.name, '新規登録');
       showToast('利用者を追加しました', 'success');
     } else {
       data.id = DB.nextIds.user++;
       DB.users.push(data);
+      addUpdateLog('user', data.id, data.name, '新規登録');
       showToast('利用者を追加しました（ローカル）', 'success');
     }
   }
@@ -2523,7 +2590,7 @@ function deleteUser(id) {
   if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
   if (!confirm('この利用者をゴミ箱に移動しますか？（90日以内に復元可能）')) return;
   const user = DB.users.find(u=>u.id===id);
-  if (user) moveToTrash('user', {...user});
+  if (user) { moveToTrash('user', {...user}); addUpdateLog('user', user.id, user.name, '削除'); }
   DB.memos.filter(m=>m.userId===id).forEach(m=>moveToTrash('memo',{...m}));
   DB.orders.filter(o=>o.userId===id).forEach(o=>moveToTrash('order',{...o}));
   DB.users = DB.users.filter(u=>u.id!==id);
@@ -2587,9 +2654,11 @@ async function saveMemo() {
   const result = await addListItem('営業メモ', spFields);
   if (result) {
     data.id = result.id; data.spId = result.id;
+    addUpdateLog('memo', data.userId, data.content?.slice(0,15)||'メモ', '新規登録');
     showToast('メモを追加しました', 'success');
   } else {
     data.id = DB.nextIds.memo++;
+    addUpdateLog('memo', data.userId, data.content?.slice(0,15)||'メモ', '新規登録');
     showToast('メモを追加しました（ローカル）', 'success');
   }
   DB.memos.push(data);
@@ -2670,14 +2739,17 @@ async function saveOrder() {
     const o = DB.orders.find(o=>o.id===editingId);
     if (o && o.spId) await updateListItem('商品レンタル', o.spId, spFields);
     Object.assign(o, data);
+    addUpdateLog('order', o.userId, o.product||'受注', '更新');
     showToast('受注情報を更新しました', 'success');
   } else {
     const result = await addListItem('商品レンタル', spFields);
     if (result) {
       data.id = result.id; data.spId = result.id;
+      addUpdateLog('order', data.userId, data.product||'受注', '新規登録');
       showToast('受注を追加しました', 'success');
     } else {
       data.id = DB.nextIds.order++;
+      addUpdateLog('order', data.userId, data.product||'受注', '新規登録');
       showToast('受注を追加しました（ローカル）', 'success');
     }
     DB.orders.push(data);
@@ -2756,9 +2828,11 @@ function saveSale() {
   };
   if (editingId) {
     Object.assign(DB.sales.find(s=>s.id===editingId), data);
+    addUpdateLog('sale', s.userId, s.product||'販売', '更新');
     showToast('販売情報を更新しました', 'success');
   } else {
     DB.sales.push(data);
+    addUpdateLog('sale', data.userId, data.product||'販売', '新規登録');
     showToast('販売を追加しました', 'success');
   }
   closeModal('modal-sale');
