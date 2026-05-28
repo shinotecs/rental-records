@@ -364,7 +364,7 @@ tr:hover td { background: var(--gray-50); }
 <!-- Header -->
 <div id="header">
   <button id="menu-toggle" onclick="toggleSidebar()">☰</button>
-  <div class="logo">🏥 記録管理システム <span>福祉用具　記録管理</span></div>
+  <div class="logo" onclick="showPage('dashboard')" style="cursor:pointer;" title="ダッシュボードへ">🏥 記録管理システム <span>福祉用具　記録管理</span></div>
   <div class="header-btns" style="display:flex;align-items:center;gap:8px;">
     <div style="position:relative;">
       <input id="global-search-input" type="text" placeholder="🔍 全体検索..."
@@ -1482,9 +1482,11 @@ window.onload = async function() {
     console.error('MSAL initialize error:', e);
   }
 
-  // リダイレクト後のトークン処理
+  // リダイレクト後のトークン処理（3秒タイムアウト付き・F5フリーズ防止）
   try {
-    const redirectResult = await msalInstance.handleRedirectPromise();
+    const redirectPromise = msalInstance.handleRedirectPromise();
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3000));
+    const redirectResult = await Promise.race([redirectPromise, timeoutPromise]);
     if (redirectResult) {
       spToken = redirectResult.accessToken;
     }
@@ -1497,12 +1499,17 @@ window.onload = async function() {
     document.getElementById('loading-screen').style.display = 'none';
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
-      // 既にサインイン済み → サイレントでトークン取得して自動ログイン
       try {
-        const result = await msalInstance.acquireTokenSilent({
+        // サイレント取得も5秒タイムアウト
+        const silentPromise = msalInstance.acquireTokenSilent({
           scopes: SP_SCOPES,
           account: accounts[0],
+          forceRefresh: false,
         });
+        const silentTimeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 5000)
+        );
+        const result = await Promise.race([silentPromise, silentTimeout]);
         spToken = result.accessToken;
         await onMSAuthSuccess(accounts[0]);
         return;
