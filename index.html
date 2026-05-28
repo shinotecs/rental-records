@@ -356,6 +356,7 @@ tr:hover td { background: var(--gray-50); }
   <div class="logo">🏥 記録管理システム <span>福祉用具　記録管理</span></div>
   <div class="header-btns">
     <button onclick="openExportModal()">📊 CSV/Excel出力</button>
+    <button id="sp-login-btn" onclick="connectSharePoint()" style="background:rgba(255,255,255,0.2);border-color:rgba(255,255,255,0.4);">☁️ SP接続</button>
   </div>
   <div id="user-badge">
     <span id="current-user">-</span>
@@ -1017,9 +1018,20 @@ const msalConfig = {
   auth: {
     clientId: SP_CONFIG.clientId,
     authority: SP_CONFIG.authority,
-    redirectUri: window.location.href.split('?')[0],
+    redirectUri: 'https://shinotecs.github.io/rental-records/',
+    navigateToLoginRequestUrl: false, // リダイレクトループ防止
   },
-  cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false },
+  cache: {
+    cacheLocation: 'localStorage',       // sessionStorageだとタブ間で失われるためlocalStorageに変更
+    storeAuthStateInCookie: true,         // IEおよびEdge Legacy対応（安全側）
+  },
+  system: {
+    loggerOptions: {
+      loggerCallback: (level, message) => {
+        if (level <= 1) console.warn('[MSAL]', message); // エラー・警告のみログ
+      },
+    },
+  },
 };
 
 const msalInstance = new msal.PublicClientApplication(msalConfig);
@@ -1029,20 +1041,34 @@ let spToken = null;
 let spSiteId = null;
 
 async function getSPToken() {
+  // サイレント取得を試みる
   try {
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
-      const result = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0] });
+      const result = await msalInstance.acquireTokenSilent({
+        scopes: SP_SCOPES,
+        account: accounts[0],
+      });
       spToken = result.accessToken;
       return spToken;
     }
-  } catch(e) {}
+  } catch(e) {
+    // サイレント失敗時はポップアップへフォールバック
+    console.warn('Silent token acquisition failed:', e);
+  }
+  // ポップアップで認証
   try {
-    const result = await msalInstance.acquireTokenPopup({ scopes: SP_SCOPES });
+    const result = await msalInstance.acquireTokenPopup({
+      scopes: SP_SCOPES,
+      prompt: 'select_account',
+    });
     spToken = result.accessToken;
     return spToken;
   } catch(e) {
-    showToast('SharePoint認証に失敗しました', 'error');
+    console.error('Popup token acquisition failed:', e);
+    if (e.errorCode !== 'user_cancelled') {
+      showToast('SharePoint認証に失敗: ' + (e.errorMessage || e.message || e.errorCode), 'error');
+    }
     return null;
   }
 }
@@ -1217,13 +1243,47 @@ async function loadFromSharePoint() {
       getListItems('商品レンタル'),
       getListItems('販売改修'),
     ]);
-    DB.users = users.map(spUserToLocal);
-    DB.memos = memos.map(spMemoToLocal);
-    DB.orders = orders.map(spOrderToLocal);
-    DB.sales = sales.map(spSaleToLocal);
-    showToast('データを読み込みました', 'success');
+    if (users.length > 0) DB.users = users.map(spUserToLocal);
+    if (memos.length > 0) DB.memos = memos.map(spMemoToLocal);
+    if (orders.length > 0) DB.orders = orders.map(spOrderToLocal);
+    if (sales.length > 0) DB.sales = sales.map(spSaleToLocal);
+    updateSPStatus(true);
+    showToast('SharePointからデータを読み込みました ✅', 'success');
   } catch(e) {
-    showToast('データ読み込みエラー: ' + e.message, 'error');
+    console.error('loadFromSharePoint error:', e);
+    showToast('データ読み込みエラー: ' + (e.message || '不明なエラー'), 'error');
+    throw e;
+  }
+}
+
+// 手動でSharePoint接続を試みる（ヘッダーボタンから呼ばれる）
+async function connectSharePoint() {
+  const btn = document.getElementById('sp-login-btn');
+  if (btn) { btn.textContent = '⏳ 接続中...'; btn.disabled = true; }
+  try {
+    const token = await getSPToken();
+    if (token) {
+      await loadFromSharePoint();
+      renderDashboard();
+      renderStaffTable();
+    }
+  } catch(e) {
+    showToast('SharePoint接続失敗: ' + (e.message || e), 'error');
+  } finally {
+    if (btn) { btn.textContent = '☁️ SP接続'; btn.disabled = false; }
+  }
+}
+
+// SP接続状態をヘッダーに反映
+function updateSPStatus(connected) {
+  const btn = document.getElementById('sp-login-btn');
+  if (!btn) return;
+  if (connected) {
+    btn.textContent = '☁️ SP接続済';
+    btn.style.background = 'rgba(46,125,79,0.6)';
+  } else {
+    btn.textContent = '☁️ SP接続';
+    btn.style.background = 'rgba(255,255,255,0.2)';
   }
 }
 </script>
@@ -1294,12 +1354,26 @@ let sortState = {};
 
 // ======================== INIT ========================
 window.onload = async function() {
-  await msalInstance.initialize();
-  // リダイレクト後の処理
+  // MSAL v3: initialize() を必ず最初に完了させる
   try {
-    await msalInstance.handleRedirectPromise();
-  } catch(e) {}
-  
+    await msalInstance.initialize();
+  } catch(e) {
+    console.error('MSAL initialize error:', e);
+  }
+
+  // リダイレクト後のトークン処理（GitHub Pages経由の場合）
+  try {
+    const redirectResult = await msalInstance.handleRedirectPromise();
+    if (redirectResult) {
+      // リダイレクトで取得できたトークンをキャッシュ
+      spToken = redirectResult.accessToken;
+      console.log('Redirect auth success:', redirectResult.account?.username);
+    }
+  } catch(e) {
+    console.warn('handleRedirectPromise error:', e);
+  }
+
+  // ローディング画面を閉じてログイン画面を表示
   setTimeout(() => {
     document.getElementById('loading-screen').style.display = 'none';
     document.getElementById('login-screen').style.display = 'flex';
@@ -1349,13 +1423,29 @@ async function initApp() {
   showPage('dashboard');
   renderDashboard();
   renderStaffTable();
-  // SharePointからデータロード
+  // SharePoint接続を試みる（失敗時はローカルデータで続行）
   try {
-    await loadFromSharePoint();
+    // MSALが初期化済みかチェック
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0 || spToken) {
+      // 既に認証済み or リダイレクトでトークン取得済みの場合は即ロード
+      await loadFromSharePoint();
+    } else {
+      // 未認証時はポップアップを出してSharePoint接続
+      const token = await getSPToken();
+      if (token) {
+        await loadFromSharePoint();
+      } else {
+        showToast('ローカルデータで動作中（☁️SP接続ボタンで再接続）', 'error');
+      }
+    }
     renderDashboard();
     renderStaffTable();
   } catch(e) {
-    showToast('オフラインモードで動作中', 'error');
+    console.warn('SharePoint接続スキップ:', e);
+    showToast('ローカルデータで動作中（☁️SP接続ボタンで再接続）', 'error');
+    renderDashboard();
+    renderStaffTable();
   }
 }
 
