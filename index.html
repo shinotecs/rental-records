@@ -49,11 +49,11 @@ body { font-family: 'Noto Sans JP', sans-serif; background: var(--gray-100); col
 }
 #header .logo { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; flex: 1; }
 #header .logo span { opacity: 0.7; font-size: 12px; font-weight: 400; display: block; }
-.header-btns { display: flex; gap: 8px; }
+.header-btns { display: flex; gap: 8px; align-items: center; }
 .header-btns button {
   background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);
   color: white; padding: 6px 14px; border-radius: var(--radius); cursor: pointer;
-  font-size: 13px; font-family: inherit; transition: all 0.15s;
+  font-size: 13px; font-family: inherit; transition: all 0.15s; white-space: nowrap;
 }
 .header-btns button:hover { background: rgba(255,255,255,0.25); }
 #user-badge {
@@ -255,6 +255,20 @@ tr:hover td { background: var(--gray-50); }
   table { min-width: 600px; }
   .page-header { flex-wrap: wrap; }
   .page-header .actions { width: 100%; }
+  /* ヘッダースマホ対応 */
+  #header { padding: 0 8px; gap: 6px; flex-wrap: nowrap; }
+  #header .logo { font-size: 13px; }
+  #header .logo span { display: none; }
+  .header-btns { gap: 4px; }
+  .header-btns button { padding: 5px 8px; font-size: 11px; }
+  #global-search-input { width: 120px !important; font-size: 11px; }
+  #user-badge { font-size: 11px; padding: 3px 8px; }
+  .role-tag { display: none; }
+}
+@media (max-width: 480px) {
+  #header .logo { font-size: 12px; min-width: 0; }
+  .header-btns button span, .header-btns button:not(#csv-btn) { font-size: 10px; }
+  #global-search-input { width: 90px !important; }
 }
 
 /* ===== SETTINGS ===== */
@@ -304,6 +318,10 @@ tr:hover td { background: var(--gray-50); }
 .role-btn { flex: 1; padding: 8px; border: 2px solid var(--gray-300); border-radius: var(--radius); cursor: pointer; text-align: center; font-size: 12px; font-weight: 700; color: var(--gray-600); transition: all 0.12s; font-family: inherit; background: white; }
 .role-btn.active { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
 
+/* ===== MOBILE LABEL HIDE ===== */
+@media (max-width: 600px) {
+  .btn-label { display: none; }
+}
 /* ===== PRINT ===== */
 @media print {
   #header, #sidebar, #menu-toggle { display: none; }
@@ -361,7 +379,7 @@ tr:hover td { background: var(--gray-50); }
         background:white;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.25);
         z-index:9999;max-height:500px;overflow-y:auto;"></div>
     </div>
-    <button onclick="openExportModal()">📊 CSV/Excel出力</button>
+    <button id="csv-btn" onclick="openExportModal()">📊 <span class="btn-label">CSV/Excel出力</span></button>
   </div>
   <div id="user-badge">
     <span id="current-user">-</span>
@@ -388,6 +406,11 @@ tr:hover td { background: var(--gray-50); }
     <div class="nav-item" onclick="showPage('orders')"><span class="nav-icon">📦</span>商品・レンタル</div>
     <div class="nav-item" onclick="showPage('memos')"><span class="nav-icon">📝</span>営業メモ一覧</div>
     <div class="nav-item" onclick="showPage('sales')"><span class="nav-icon">💰</span>販売・改修・他</div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">ツール</div>
+    <div class="nav-item" onclick="printChecklist()"><span class="nav-icon">🖨️</span>作業チェックリスト</div>
+    <div class="nav-item" onclick="showPage('trash')"><span class="nav-icon">🗑️</span>ゴミ箱 <span class="badge" id="trash-count">0</span></div>
   </div>
   <div class="nav-section" id="admin-menu">
     <div class="nav-label">管理者メニュー</div>
@@ -624,6 +647,16 @@ tr:hover td { background: var(--gray-50); }
         <tbody id="sales-body"></tbody>
       </table>
       <div class="pagination" id="sales-pagination"></div>
+    </div>
+  </div>
+
+  <!-- Trash -->
+  <div id="page-trash" class="page">
+    <div class="page-header">
+      <div class="page-title">🗑️ ゴミ箱（90日保存）</div>
+    </div>
+    <div class="table-wrap">
+      <div id="trash-list"></div>
     </div>
   </div>
 
@@ -1022,8 +1055,16 @@ const msalConfig = {
     navigateToLoginRequestUrl: false, // リダイレクトループ防止
   },
   cache: {
-    cacheLocation: 'localStorage',       // sessionStorageだとタブ間で失われるためlocalStorageに変更
-    storeAuthStateInCookie: true,         // IEおよびEdge Legacy対応（安全側）
+    cacheLocation: 'localStorage',
+    storeAuthStateInCookie: true,
+  },
+  system: {
+    tokenRenewalOffsetSeconds: 300, // 期限5分前に自動更新
+    loggerOptions: {
+      loggerCallback: (level, message) => {
+        if (level <= 1) console.warn('[MSAL]', message);
+      },
+    },
   },
   system: {
     loggerOptions: {
@@ -1048,6 +1089,7 @@ async function getSPToken() {
       const result = await msalInstance.acquireTokenSilent({
         scopes: SP_SCOPES,
         account: accounts[0],
+        forceRefresh: false,
       });
       spToken = result.accessToken;
       return spToken;
@@ -1340,7 +1382,8 @@ let DB = {
   sales: [
     {id:1,userId:1,category:'在宅',staff:'篠',status:'住宅改修',product:'手摺の取り付け　3ヶ所',amount:35000,start:'2026-02-12',end:'2026-02-15',check:'****',biko:''},
   ],
-  nextIds: {user:9,memo:8,order:10,sale:2}
+  nextIds: {user:9,memo:8,order:10,sale:2},
+  trash: [], // ゴミ箱（削除済みデータ、90日保存）
 };
 
 // ======================== STATE ========================
@@ -1471,6 +1514,71 @@ window.onload = async function() {
     document.getElementById('login-screen').style.display = 'block';
   }, 1400);
 };
+
+
+// ======================== ゴミ箱 ========================
+function moveToTrash(type, data) {
+  const deletedAt = new Date().toISOString();
+  const expireAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+  DB.trash.push({ type, data, deletedAt, expireAt });
+  // 90日過ぎたものを自動削除
+  DB.trash = DB.trash.filter(t => new Date(t.expireAt) > new Date());
+}
+
+function restoreFromTrash(idx) {
+  const item = DB.trash[idx];
+  if (!item) return;
+  if (item.type === 'user') {
+    DB.users.push(item.data);
+    showToast('利用者を復元しました', 'success');
+  } else if (item.type === 'memo') {
+    DB.memos.push(item.data);
+    showToast('メモを復元しました', 'success');
+  } else if (item.type === 'order') {
+    DB.orders.push(item.data);
+    showToast('受注を復元しました', 'success');
+  } else if (item.type === 'sale') {
+    DB.sales.push(item.data);
+    showToast('販売データを復元しました', 'success');
+  }
+  DB.trash.splice(idx, 1);
+  renderTrash();
+  renderDashboard();
+}
+
+function deleteFromTrash(idx) {
+  if (!confirm('完全に削除します。この操作は取り消せません。')) return;
+  DB.trash.splice(idx, 1);
+  renderTrash();
+  showToast('完全に削除しました', 'success');
+}
+
+function renderTrash() {
+  const el = document.getElementById('trash-list');
+  if (!el) return;
+  const typeLabel = {user:'利用者', memo:'メモ', order:'受注', sale:'販売'};
+  const active = DB.trash.filter(t => new Date(t.expireAt) > new Date());
+  if (active.length === 0) {
+    el.innerHTML = '<div style="padding:32px;text-align:center;color:var(--gray-500);">ゴミ箱は空です</div>';
+    return;
+  }
+  el.innerHTML = active.map((t, i) => {
+    const daysLeft = Math.ceil((new Date(t.expireAt) - new Date()) / (1000*60*60*24));
+    const name = t.data.name || t.data.product || t.data.content?.slice(0,20) || '-';
+    const userName = t.type !== 'user' ? (DB.users.find(u=>u.id===t.data.userId)?.name || t.data.userId || '') : '';
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--gray-100);">
+        <span class="badge badge-gray">${typeLabel[t.type]||t.type}</span>
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:500;">${userName ? userName+'　' : ''}${name}</div>
+          <div style="font-size:11px;color:var(--gray-500);">削除日：${t.deletedAt.slice(0,10)}　残り${daysLeft}日</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="restoreFromTrash(${i})">↩ 復元</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteFromTrash(${i})">完全削除</button>
+      </div>
+    `;
+  }).join('');
+}
 
 
 // ======================== GLOBAL SEARCH ========================
@@ -1605,6 +1713,121 @@ document.addEventListener('click', function(e) {
   }
 });
 
+
+// ======================== 担当者別チェックリスト印刷 ========================
+function printChecklist() {
+  const today = new Date();
+  const dateStr = today.getFullYear() + '年' + (today.getMonth()+1) + '月' + today.getDate() + '日（' + ['日','月','火','水','木','金','土'][today.getDay()] + '）';
+
+  const staffList = DB.staff.filter(s => s.role === '営業' || s.role === '所長' || s.role === '社長');
+
+  let html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+  <title>作業チェックリスト ${dateStr}</title>
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Meiryo', 'Yu Gothic', sans-serif; }
+    body { font-size: 10pt; color: #111; }
+    .page { width: 100%; page-break-after: always; padding: 4mm; }
+    .page:last-child { page-break-after: avoid; }
+    .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #1a6b8a; padding-bottom: 3mm; margin-bottom: 4mm; }
+    .header-left h1 { font-size: 14pt; color: #1a6b8a; font-weight: bold; }
+    .header-left p { font-size: 9pt; color: #555; margin-top: 1mm; }
+    .header-right { font-size: 9pt; color: #555; text-align: right; }
+    table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+    th { background: #1a6b8a; color: white; padding: 2mm 2mm; text-align: center; font-weight: bold; border: 1px solid #ccc; white-space: nowrap; }
+    td { padding: 2mm 2mm; border: 1px solid #ddd; vertical-align: middle; }
+    tr:nth-child(even) td { background: #f4f8fb; }
+    .cat-home { background: #dbeafe; color: #1e40af; padding: 1px 4px; border-radius: 3px; font-size: 7.5pt; font-weight: bold; }
+    .cat-facility { background: #dcfce7; color: #166534; padding: 1px 4px; border-radius: 3px; font-size: 7.5pt; font-weight: bold; }
+    .cat-corp { background: #ede9fe; color: #5b21b6; padding: 1px 4px; border-radius: 3px; font-size: 7.5pt; font-weight: bold; }
+    .st-pending { background: #dbeafe; color: #1e40af; padding: 1px 5px; border-radius: 3px; font-size: 7.5pt; }
+    .st-urgent { background: #fee2e2; color: #991b1b; padding: 1px 5px; border-radius: 3px; font-size: 7.5pt; font-weight: bold; }
+    .st-done { background: #dcfce7; color: #166534; padding: 1px 5px; border-radius: 3px; font-size: 7.5pt; }
+    .check-col { width: 6mm; text-align: center; font-size: 12pt; }
+    .memo-line { border-bottom: 1px solid #aaa; height: 5mm; display: inline-block; width: 90%; }
+    .section-title { font-size: 9pt; font-weight: bold; color: #1a6b8a; margin: 3mm 0 1mm 0; }
+    .footer { margin-top: 4mm; font-size: 7.5pt; color: #888; text-align: right; border-top: 1px solid #ddd; padding-top: 2mm; }
+    .no-data { color: #aaa; font-size: 8pt; padding: 3mm; text-align: center; }
+  </style></head><body>`;
+
+  staffList.forEach(staff => {
+    const targets = DB.users.filter(u =>
+      u.staff === staff.name &&
+      (u.tantou === '対応中' || u.tantou === '要確認' || u.jimu === '対応中' || u.jimu === '要確認') &&
+      u.status !== '終了'
+    );
+
+    const homeUsers = targets.filter(u => u.category === '在宅');
+    const facilityUsers = targets.filter(u => u.category === '施設');
+    const corpUsers = targets.filter(u => u.category === '法人' || u.category === '法人・業者');
+
+    const renderRows = (users) => users.map(u => {
+      const orders = DB.orders.filter(o => o.userId === u.id && o.status !== '終了' && o.status !== 'デモ返却');
+      const latestMemo = DB.memos.filter(m => m.userId === u.id).sort((a,b)=>b.date.localeCompare(a.date))[0];
+      const orderText = orders.map(o => o.product).join('　/　') || '－';
+      const catClass = u.category==='在宅'?'cat-home':u.category==='施設'?'cat-facility':'cat-corp';
+      const tantouClass = u.tantou==='要確認'?'st-urgent':u.tantou==='完了'?'st-done':'st-pending';
+      const jimuClass = u.jimu==='要確認'?'st-urgent':u.jimu==='完了'?'st-done':'st-pending';
+      return `<tr>
+        <td class="check-col">□</td>
+        <td><span class="${catClass}">${u.category}</span></td>
+        <td style="font-weight:bold;">${u.name}</td>
+        <td>${u.org||'－'}</td>
+        <td style="font-size:7.5pt;max-width:80mm;">${orderText}</td>
+        <td style="text-align:center;"><span class="${tantouClass}">${u.tantou||'－'}</span></td>
+        <td style="text-align:center;"><span class="${jimuClass}">${u.jimu||'－'}</span></td>
+        <td style="font-size:7.5pt;color:#555;">${latestMemo ? latestMemo.date+'　'+latestMemo.content.slice(0,25).replace(/
+/g,' ')+'…' : '－'}</td>
+        <td><span class="memo-line"></span></td>
+      </tr>`;
+    }).join('');
+
+    html += `<div class="page">
+      <div class="header">
+        <div class="header-left">
+          <h1>🏥 シノテクス株式会社　福祉用具　作業チェックリスト</h1>
+          <p>担当：<strong>${staff.fullname||staff.name}</strong>　（${staff.role}）</p>
+        </div>
+        <div class="header-right">${dateStr}<br>対応中・要確認 ${targets.length}件</div>
+      </div>`;
+
+    if (targets.length === 0) {
+      html += '<div class="no-data">本日の対応中・要確認案件はありません ✅</div>';
+    } else {
+      html += `<table>
+        <thead><tr>
+          <th>✓</th><th>区分</th><th>利用者名</th><th>居宅・施設</th>
+          <th>商品・レンタル</th><th>担当処理</th><th>事務処理</th>
+          <th>最新メモ（抜粋）</th><th>メモ欄</th>
+        </tr></thead><tbody>`;
+
+      if (homeUsers.length > 0) {
+        html += `<tr><td colspan="9" style="background:#eff6ff;padding:1mm 2mm;font-weight:bold;font-size:8pt;color:#1e40af;">🏠 在宅（${homeUsers.length}件）</td></tr>`;
+        html += renderRows(homeUsers);
+      }
+      if (facilityUsers.length > 0) {
+        html += `<tr><td colspan="9" style="background:#f0fdf4;padding:1mm 2mm;font-weight:bold;font-size:8pt;color:#166534;">🏢 施設（${facilityUsers.length}件）</td></tr>`;
+        html += renderRows(facilityUsers);
+      }
+      if (corpUsers.length > 0) {
+        html += `<tr><td colspan="9" style="background:#faf5ff;padding:1mm 2mm;font-weight:bold;font-size:8pt;color:#5b21b6;">🏭 法人・業者（${corpUsers.length}件）</td></tr>`;
+        html += renderRows(corpUsers);
+      }
+      html += '</tbody></table>';
+    }
+
+    html += `<div class="footer">シノテクス株式会社　福祉用具部門　${dateStr}　印刷日時：${new Date().toLocaleString('ja-JP')}</div>
+    </div>`;
+  });
+
+  html += '</body></html>';
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+  win.onload = () => win.print();
+}
+
 function logout() {
   // Microsoftアカウントからもサインアウト
   const accounts = msalInstance.getAllAccounts();
@@ -1667,6 +1890,7 @@ function showPage(name) {
   if (name === 'sales') renderSales();
   if (name === 'settings') renderSettings();
   if (name === 'users-admin') renderStaffTable();
+  if (name === 'trash') { renderTrash(); }
   if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
 }
 
@@ -1713,7 +1937,7 @@ function renderDashboard() {
       <div class="memo-item" style="margin:8px;border-radius:6px;">
         <div class="memo-meta">
           <strong>${u?u.name:'不明'}</strong>
-          <span class="badge badge-gray">${m.category}</span>
+          ${getCategoryBadge(m.category)}
           <span>${m.date}</span>
           <span>${m.staff}</span>
         </div>
@@ -1722,6 +1946,9 @@ function renderDashboard() {
     `;
   }).join('');
   document.getElementById('recent-memos').innerHTML = memosHTML;
+  // ゴミ箱件数更新
+  const tc = document.getElementById('trash-count');
+  if (tc) tc.textContent = DB.trash.filter(t=>new Date(t.expireAt)>new Date()).length || '';
 }
 
 // ======================== BOARD ========================
@@ -1747,7 +1974,7 @@ function renderBoard() {
             <div class="card-name">${u.name}</div>
             <div class="card-sub">${u.org||''} / ${u.staff||''}</div>
             <div class="card-meta">
-              <span class="badge badge-gray">${u.category}</span>
+              ${getCategoryBadge(u.category)}
               ${u.tantou==='要確認'?'<span class="badge badge-red">担当:要確認</span>':''}
               ${u.jimu==='要確認'?'<span class="badge badge-red">事務:要確認</span>':''}
             </div>
@@ -1761,8 +1988,20 @@ function renderBoard() {
 
 // ======================== USERS ========================
 function getStatusBadge(status) {
-  const map = {'利用中':'badge-green','【新規】利用中':'badge-blue','デモ中':'badge-orange','入院中':'badge-yellow','終了':'badge-gray','要確認':'badge-red','対応中':'badge-blue','完了':'badge-green'};
+  const map = {
+    '利用中':'badge-green','【新規】利用中':'badge-blue',
+    'デモ中':'badge-orange','入院中':'badge-yellow',
+    '終了':'badge-gray','要確認':'badge-red',
+    '対応中':'badge-blue','完了':'badge-green',
+    'レンタル':'badge-green','デモ返却':'badge-gray',
+    '介保販売':'badge-purple','住宅改修':'badge-blue','一般販売':'badge-orange',
+  };
   return `<span class="badge ${map[status]||'badge-gray'}">${status||'-'}</span>`;
+}
+
+function getCategoryBadge(category) {
+  const map = {'在宅':'badge-blue','施設':'badge-green','法人':'badge-purple','法人・業者':'badge-purple'};
+  return `<span class="badge ${map[category]||'badge-gray'}">${category||'-'}</span>`;
 }
 
 function getCategoryUsers(cat) {
@@ -1891,7 +2130,7 @@ function renderOrders() {
       <td>${o.id}</td>
       <td>${u?`<a href="#" onclick="openDetail(${u.id});return false;" style="color:var(--primary);">${u.name}</a>`:'-'}</td>
       <td>${u?u.org||'-':'-'}</td>
-      <td><span class="badge badge-gray">${o.category}</span></td>
+      <td>${getCategoryBadge(o.category)}</td>
       <td style="max-width:220px;font-size:12px;">${o.product||'-'}</td>
       <td>${getStatusBadge(o.status)}</td>
       <td>${o.unit?'¥'+Number(o.unit).toLocaleString():'-'}</td>
@@ -1933,7 +2172,7 @@ function renderMemos() {
     const u = DB.users.find(u=>u.id===m.userId);
     return `<tr>
       <td>${u?`<a href="#" onclick="openDetail(${u.id});return false;" style="color:var(--primary);">${u.name}</a>`:'-'}</td>
-      <td><span class="badge badge-gray">${m.category}</span></td>
+      <td>${getCategoryBadge(m.category)}</td>
       <td>${u?u.org||'-':'-'}</td>
       <td>${m.staff||'-'}</td>
       <td>${m.date||'-'}</td>
@@ -1971,8 +2210,8 @@ function renderSales() {
   document.getElementById('sales-body').innerHTML = pageData.map(s=>{
     const u = DB.users.find(u=>u.id===s.userId);
     return `<tr>
-      <td>${u?u.name:'-'}</td>
-      <td><span class="badge badge-gray">${s.category}</span></td>
+      <td>${u?`<a href="#" onclick="openDetail(${u.id});return false;" style="color:var(--primary);font-weight:500;">${u.name}</a>`:'-'}</td>
+      <td>${getCategoryBadge(s.category)}</td>
       <td>${u?u.org||'-':'-'}</td>
       <td>${getStatusBadge(s.status)}</td>
       <td>${s.product||'-'}</td>
@@ -2001,6 +2240,47 @@ function openDetail(userId) {
   document.getElementById('detail-edit-btn').style.display = canEdit ? 'inline-flex':'none';
   editingId = userId; editingType = 'user';
 
+  // 施設・居宅マスタ情報取得
+  const orgInfo = u.category === '在宅'
+    ? DB.masters.kyotaku.find(k => k === u.org)
+    : DB.masters.facilities.find(f => f === u.org);
+
+  // 商品フィルター関数（detail内で使用）
+  window._detailUserId = userId;
+  window._detailOrderFilter = 'all';
+
+  function renderDetailOrders(filter) {
+    window._detailOrderFilter = filter;
+    const filtered = userOrders.filter(o => {
+      if (filter === 'all') return true;
+      if (filter === 'rental') return o.status === 'レンタル';
+      if (filter === 'demo') return o.status === 'デモ中';
+      if (filter === 'end') return o.status === '終了' || o.status === 'デモ返却' || o.status === '入院中';
+      return true;
+    });
+    const el = document.getElementById('detail-orders-list');
+    if (!el) return;
+    const counts = {
+      all: userOrders.length,
+      rental: userOrders.filter(o=>o.status==='レンタル').length,
+      demo: userOrders.filter(o=>o.status==='デモ中').length,
+      end: userOrders.filter(o=>['終了','デモ返却','入院中'].includes(o.status)).length,
+    };
+    document.querySelectorAll('.order-filter-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.filter === filter);
+    });
+    el.innerHTML = filtered.length===0
+      ? '<div style="color:var(--gray-500);font-size:13px;padding:8px;">該当なし</div>'
+      : filtered.map(o=>`
+          <div class="product-item" style="flex-wrap:wrap;gap:6px;">
+            <div class="product-name" style="font-weight:500;">${o.product||'-'}</div>
+            <div>${getStatusBadge(o.status)}</div>
+            <div class="product-price">${o.unit?'¥'+Number(o.unit).toLocaleString()+'/月':''}</div>
+            <div style="font-size:11px;color:var(--gray-500);">納品：${o.start||'-'}　${o.end&&o.end!='****'?'回収：'+o.end:''}</div>
+            ${o.biko?`<div style="font-size:11px;color:var(--accent);width:100%;">⚠️ ${o.biko}</div>`:''}
+          </div>`).join('');
+  }
+
   document.getElementById('detail-body').innerHTML = `
     <div class="detail-wrap">
       <div>
@@ -2009,8 +2289,8 @@ function openDetail(userId) {
             <span>${getStatusBadge(u.status)}</span>
           </div>
           <div class="detail-card-body">
-            <div class="info-row"><span class="key">カテゴリ</span><span class="val">${u.category}</span></div>
-            <div class="info-row"><span class="key">施設/居宅</span><span class="val">${u.org||'-'}</span></div>
+            <div class="info-row"><span class="key">カテゴリ</span><span class="val">${getCategoryBadge(u.category)}</span></div>
+            <div class="info-row"><span class="key">施設/居宅</span><span class="val" style="font-weight:600;">${u.org||'-'}</span></div>
             <div class="info-row"><span class="key">担当者</span><span class="val">${u.staff||'-'}</span></div>
             <div class="info-row"><span class="key">開始年月</span><span class="val">${u.start||'-'}</span></div>
             <div class="info-row"><span class="key">担当処理</span><span class="val">${getStatusBadge(u.tantou)}</span></div>
@@ -2019,6 +2299,7 @@ function openDetail(userId) {
             <div class="info-row"><span class="key">振替入力</span><span class="val">${u.furikae||'-'}</span></div>
             ${u.memo?`<div class="info-row" style="flex-direction:column;gap:4px;"><span class="key">メモ・伝達事項</span><span style="font-size:13px;white-space:pre-wrap;background:var(--gray-50);padding:8px;border-radius:6px;">${u.memo}</span></div>`:''}
             ${u.family?`<div class="info-row" style="flex-direction:column;gap:4px;"><span class="key">家族情報</span><span style="font-size:13px;white-space:pre-wrap;background:var(--gray-50);padding:8px;border-radius:6px;">${u.family}</span></div>`:''}
+            ${u.biko?`<div class="info-row"><span class="key">備考</span><span class="val">${u.biko}</span></div>`:''}
           </div>
         </div>
 
@@ -2026,17 +2307,14 @@ function openDetail(userId) {
           <div class="detail-card-header">📦 商品・レンタル（${userOrders.length}件）
             <button class="btn btn-outline btn-sm" onclick="openAddOrderModal(${userId})">＋追加</button>
           </div>
-          <div class="detail-card-body">
-            ${userOrders.length===0?'<div style="color:var(--gray-500);font-size:13px;">商品なし</div>':
-              userOrders.map(o=>`
-                <div class="product-item">
-                  <div class="product-name">${o.product||'-'}</div>
-                  <div>${getStatusBadge(o.status)}</div>
-                  <div class="product-price">${o.unit?'¥'+Number(o.unit).toLocaleString()+'/月':''}</div>
-                  <div style="font-size:12px;color:var(--gray-500);">${o.start||''}</div>
-                </div>
-              `).join('')
-            }
+          <div style="display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid var(--gray-200);flex-wrap:wrap;">
+            <button class="tab order-filter-tab active" data-filter="all" onclick="renderDetailOrders('all')" style="padding:4px 10px;font-size:12px;">全て（${userOrders.length}）</button>
+            <button class="tab order-filter-tab" data-filter="rental" onclick="renderDetailOrders('rental')" style="padding:4px 10px;font-size:12px;">🟢 レンタル（${userOrders.filter(o=>o.status==='レンタル').length}）</button>
+            <button class="tab order-filter-tab" data-filter="demo" onclick="renderDetailOrders('demo')" style="padding:4px 10px;font-size:12px;">🟠 デモ中（${userOrders.filter(o=>o.status==='デモ中').length}）</button>
+            <button class="tab order-filter-tab" data-filter="end" onclick="renderDetailOrders('end')" style="padding:4px 10px;font-size:12px;">⬜ 終了・回収（${userOrders.filter(o=>['終了','デモ返却','入院中'].includes(o.status)).length}）</button>
+          </div>
+          <div class="detail-card-body" id="detail-orders-list">
+            <div style="color:var(--gray-500);font-size:13px;">読み込み中...</div>
           </div>
         </div>
 
@@ -2051,8 +2329,8 @@ function openDetail(userId) {
                   <div class="product-name">${s.product||'-'}</div>
                   <div>${getStatusBadge(s.status)}</div>
                   <div class="product-price">${s.amount?'¥'+Number(s.amount).toLocaleString():''}</div>
-                </div>
-              `).join('')
+                  <div style="font-size:11px;color:var(--gray-500);">納品：${s.start||'-'}</div>
+                </div>`).join('')
             }
           </div>
         </div>
@@ -2073,8 +2351,7 @@ function openDetail(userId) {
                     ${getStatusBadge(m.tantou)}
                   </div>
                   <div class="memo-text">${m.content||''}</div>
-                </div>
-              `).join('')
+                </div>`).join('')
             }
           </div>
         </div>
@@ -2082,6 +2359,8 @@ function openDetail(userId) {
     </div>
   `;
   openModal('modal-detail');
+  // 初期表示
+  setTimeout(() => renderDetailOrders('all'), 50);
 }
 
 function editCurrentUser() {
@@ -2235,7 +2514,11 @@ async function saveUser() {
 
 function deleteUser(id) {
   if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
-  if (!confirm('この利用者を削除しますか？関連するメモ・受注も削除されます。')) return;
+  if (!confirm('この利用者をゴミ箱に移動しますか？（90日以内に復元可能）')) return;
+  const user = DB.users.find(u=>u.id===id);
+  if (user) moveToTrash('user', {...user});
+  DB.memos.filter(m=>m.userId===id).forEach(m=>moveToTrash('memo',{...m}));
+  DB.orders.filter(o=>o.userId===id).forEach(o=>moveToTrash('order',{...o}));
   DB.users = DB.users.filter(u=>u.id!==id);
   DB.memos = DB.memos.filter(m=>m.userId!==id);
   DB.orders = DB.orders.filter(o=>o.userId!==id);
@@ -2309,9 +2592,11 @@ async function saveMemo() {
 
 function deleteMemo(id) {
   if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
-  if (!confirm('このメモを削除しますか？')) return;
+  if (!confirm('このメモをゴミ箱に移動しますか？（90日以内に復元可能）')) return;
+  const memo = DB.memos.find(m=>m.id===id);
+  if (memo) moveToTrash('memo', {...memo});
   DB.memos = DB.memos.filter(m=>m.id!==id);
-  showToast('メモを削除しました', 'success');
+  showToast('メモをゴミ箱に移動しました', 'success');
   renderMemos(); renderDashboard();
 }
 
@@ -2418,9 +2703,11 @@ function openEditOrder(id) {
 
 function deleteOrder(id) {
   if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
-  if (!confirm('この受注を削除しますか？')) return;
+  if (!confirm('この受注をゴミ箱に移動しますか？（90日以内に復元可能）')) return;
+  const order = DB.orders.find(o=>o.id===id);
+  if (order) moveToTrash('order', {...order});
   DB.orders = DB.orders.filter(o=>o.id!==id);
-  showToast('受注を削除しました', 'success');
+  showToast('受注をゴミ箱に移動しました', 'success');
   renderOrders(); renderDashboard();
 }
 
@@ -2491,9 +2778,11 @@ function openEditSale(id) {
 
 function deleteSale(id) {
   if (!currentPerms.canEditUser) { showToast('権限がありません', 'error'); return; }
-  if (!confirm('この販売記録を削除しますか？')) return;
+  if (!confirm('この販売記録をゴミ箱に移動しますか？（90日以内に復元可能）')) return;
+  const sale = DB.sales.find(s=>s.id===id);
+  if (sale) moveToTrash('sale', {...sale});
   DB.sales = DB.sales.filter(s=>s.id!==id);
-  showToast('販売記録を削除しました', 'success');
+  showToast('販売記録をゴミ箱に移動しました', 'success');
   renderSales();
 }
 
