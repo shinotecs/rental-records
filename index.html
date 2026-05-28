@@ -347,9 +347,21 @@ tr:hover td { background: var(--gray-50); }
 <div id="header">
   <button id="menu-toggle" onclick="toggleSidebar()">☰</button>
   <div class="logo">🏥 記録管理システム <span>福祉用具　記録管理</span></div>
-  <div class="header-btns">
+  <div class="header-btns" style="display:flex;align-items:center;gap:8px;">
+    <div style="position:relative;">
+      <input id="global-search-input" type="text" placeholder="🔍 全体検索..."
+        oninput="globalSearch(this.value)"
+        style="padding:6px 14px;border:1px solid rgba(255,255,255,0.3);border-radius:20px;
+               background:rgba(255,255,255,0.15);color:white;font-size:13px;width:220px;
+               font-family:inherit;outline:none;"
+        onfocus="this.style.background='rgba(255,255,255,0.25)'"
+        onblur="if(!this.value)document.getElementById('global-search-results').style.display='none';this.style.background='rgba(255,255,255,0.15)'"
+      >
+      <div id="global-search-results" style="display:none;position:absolute;top:38px;left:0;width:500px;
+        background:white;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.25);
+        z-index:9999;max-height:500px;overflow-y:auto;"></div>
+    </div>
     <button onclick="openExportModal()">📊 CSV/Excel出力</button>
-    <button id="sp-login-btn" onclick="connectSharePoint()" style="background:rgba(255,255,255,0.2);border-color:rgba(255,255,255,0.4);">☁️ SP接続</button>
   </div>
   <div id="user-badge">
     <span id="current-user">-</span>
@@ -633,7 +645,7 @@ tr:hover td { background: var(--gray-50); }
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>名前</th><th>メールアドレス</th><th>役割</th><th>権限設定</th><th>担当区分</th><th>登録日</th><th>操作</th></tr></thead>
+        <thead><tr><th>名前</th><th>メールアドレス</th><th>役割</th><th>権限設定</th><th>登録日</th><th>操作</th></tr></thead>
         <tbody id="staff-table-body"></tbody>
       </table>
     </div>
@@ -945,12 +957,7 @@ tr:hover td { background: var(--gray-50); }
             <option>営業</option><option>総務</option><option>管理者</option><option>社長</option>
           </select>
         </div>
-        <div class="form-group">
-          <label>担当区分</label>
-          <select id="st-area">
-            <option>在宅・施設</option><option>在宅のみ</option><option>施設のみ</option><option>法人・業者</option><option>全担当</option>
-          </select>
-        </div>
+
       </div>
     </div>
     <div class="modal-footer">
@@ -1257,8 +1264,9 @@ async function connectSharePoint() {
     const token = await getSPToken();
     if (token) {
       await loadFromSharePoint();
-      renderDashboard();
-      renderStaffTable();
+      // 現在表示中のページのみ再描画（存在する要素のみ）
+      if (document.getElementById('dash-stats')) renderDashboard();
+      if (document.getElementById('staff-table-body')) renderStaffTable();
     }
   } catch(e) {
     showToast('SharePoint接続失敗: ' + (e.message || e), 'error');
@@ -1284,12 +1292,12 @@ function updateSPStatus(connected) {
 // ======================== DATA STORE ========================
 let DB = {
   staff: [
-    {id:1,name:'篠',fullname:'篠 裕介',email:'y.shino@shinotecs.onmicrosoft.com',role:'社長',area:'全担当',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
-    {id:2,name:'小林',fullname:'小林 裕明',email:'h.kobayashi@shinotecs.onmicrosoft.com',role:'所長',area:'在宅・施設',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
-    {id:3,name:'青池',fullname:'青池 良太',email:'r.aoike@shinotecs.onmicrosoft.com',role:'営業',area:'在宅・施設',canEditOrder:true,canEditUser:false,canAdmin:false,created:'2026-01-01'},
-    {id:4,name:'茂木',fullname:'茂木 はるな',email:'h.moteki@shinotecs.onmicrosoft.com',role:'営業',area:'在宅・施設',canEditOrder:true,canEditUser:false,canAdmin:false,created:'2026-01-01'},
-    {id:5,name:'杉山',fullname:'杉山 郁美',email:'i.sugiyama@shinotecs.onmicrosoft.com',role:'総務',area:'全担当',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
-    {id:6,name:'小森谷',fullname:'小森谷 恵',email:'m.komoriya@shinotecs.onmicrosoft.com',role:'総務',area:'全担当',canEditOrder:true,canEditUser:false,canAdmin:false,created:'2026-01-01'},
+    {id:1,name:'篠',fullname:'篠 裕介',email:'y.shino@shinotecs.onmicrosoft.com',role:'社長',area:'',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
+    {id:2,name:'小林',fullname:'小林 裕明',email:'h.kobayashi@shinotecs.onmicrosoft.com',role:'所長',area:'',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
+    {id:3,name:'青池',fullname:'青池 良太',email:'r.aoike@shinotecs.onmicrosoft.com',role:'営業',area:'',canEditOrder:true,canEditUser:true,canAdmin:false,created:'2026-01-01'},
+    {id:4,name:'茂木',fullname:'茂木 はるな',email:'h.moteki@shinotecs.onmicrosoft.com',role:'営業',area:'',canEditOrder:true,canEditUser:true,canAdmin:false,created:'2026-01-01'},
+    {id:5,name:'杉山',fullname:'杉山 郁美',email:'i.sugiyama@shinotecs.onmicrosoft.com',role:'総務',area:'',canEditOrder:true,canEditUser:true,canAdmin:true,created:'2026-01-01'},
+    {id:6,name:'小森谷',fullname:'小森谷 恵',email:'m.komoriya@shinotecs.onmicrosoft.com',role:'総務',area:'',canEditOrder:true,canEditUser:true,canAdmin:false,created:'2026-01-01'},
   ],
   masters: {
     statuses: ['レンタル','デモ中','デモ返却','終了','入院中','【新規】利用中'],
@@ -1464,6 +1472,139 @@ window.onload = async function() {
   }, 1400);
 };
 
+
+// ======================== GLOBAL SEARCH ========================
+function globalSearch(query) {
+  const resultsEl = document.getElementById('global-search-results');
+  if (!query || query.trim().length < 2) {
+    resultsEl.style.display = 'none';
+    return;
+  }
+  const q = query.trim().toLowerCase();
+  const results = [];
+
+  DB.users.forEach(u => {
+    const fields = [
+      {label:'利用者名', val: u.name},
+      {label:'居宅・施設名', val: u.org},
+      {label:'担当者', val: u.staff},
+      {label:'ステータス', val: u.status},
+      {label:'メモ・伝達事項', val: u.memo},
+      {label:'家族情報', val: u.family},
+      {label:'備考', val: u.biko},
+      {label:'開始年月', val: u.start},
+    ];
+    fields.forEach(f => {
+      if (f.val && f.val.toLowerCase().includes(q)) {
+        results.push({
+          type: 'user', userId: u.id,
+          userName: u.name, category: u.category, org: u.org||'',
+          matchField: f.label,
+          matchVal: highlight(f.val, q),
+        });
+      }
+    });
+
+    // メモ検索
+    DB.memos.filter(m => m.userId === u.id).forEach(m => {
+      if (m.content && m.content.toLowerCase().includes(q)) {
+        results.push({
+          type: 'memo', userId: u.id,
+          userName: u.name, category: u.category, org: u.org||'',
+          matchField: '営業メモ (' + (m.date||'') + ')',
+          matchVal: highlight(m.content, q),
+        });
+      }
+    });
+
+    // 受注・商品検索
+    DB.orders.filter(o => o.userId === u.id).forEach(o => {
+      const oFields = [
+        {label:'商品名', val: o.product},
+        {label:'受注備考', val: o.biko},
+      ];
+      oFields.forEach(f => {
+        if (f.val && f.val.toLowerCase().includes(q)) {
+          results.push({
+            type: 'order', userId: u.id,
+            userName: u.name, category: u.category, org: u.org||'',
+            matchField: f.label,
+            matchVal: highlight(f.val, q),
+          });
+        }
+      });
+    });
+
+    // 販売検索
+    DB.sales.filter(s => s.userId === u.id).forEach(s => {
+      const sFields = [
+        {label:'販売商品', val: s.product},
+        {label:'販売備考', val: s.biko},
+      ];
+      sFields.forEach(f => {
+        if (f.val && f.val.toLowerCase().includes(q)) {
+          results.push({
+            type: 'sale', userId: u.id,
+            userName: u.name, category: u.category, org: u.org||'',
+            matchField: f.label,
+            matchVal: highlight(f.val, q),
+          });
+        }
+      });
+    });
+  });
+
+  // 重複を除去（同じuser+fieldの組み合わせ）
+  const seen = new Set();
+  const unique = results.filter(r => {
+    const key = r.userId + '_' + r.matchField;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+
+  if (unique.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:16px;text-align:center;color:#9aa0a6;font-size:13px;">「' + query + '」に一致する結果がありません</div>';
+  } else {
+    const catBadge = c => c==='在宅'?'badge-blue':c==='施設'?'badge-green':'badge-gray';
+    resultsEl.innerHTML =
+      '<div style="padding:8px 14px;font-size:11px;color:#9aa0a6;border-bottom:1px solid #e8eaed;font-weight:700;">検索結果 ' + unique.length + '件</div>' +
+      unique.map(r => `
+        <div onclick="openDetail(${r.userId});closeGlobalSearch();"
+          style="padding:10px 14px;border-bottom:1px solid #f1f3f4;cursor:pointer;transition:background 0.1s;"
+          onmouseover="this.style.background='#f1f3f4'" onmouseout="this.style.background=''">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+            <strong style="font-size:13px;">${r.userName}</strong>
+            <span class="badge ${catBadge(r.category)}" style="font-size:10px;">${r.category}</span>
+            <span style="font-size:12px;color:#80868b;">${r.org}</span>
+          </div>
+          <div style="font-size:11px;color:#5f6368;margin-bottom:2px;">📌 ${r.matchField}</div>
+          <div style="font-size:12px;color:#3c4043;white-space:pre-wrap;max-height:48px;overflow:hidden;">${r.matchVal}</div>
+        </div>
+      `).join('');
+  }
+  resultsEl.style.display = 'block';
+}
+
+function highlight(text, query) {
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp('(' + escaped + ')', 'gi'),
+    '<mark style="background:#fff3cd;padding:0 2px;border-radius:2px;">$1</mark>');
+}
+
+function closeGlobalSearch() {
+  document.getElementById('global-search-input').value = '';
+  document.getElementById('global-search-results').style.display = 'none';
+}
+
+// 検索結果以外クリックで閉じる
+document.addEventListener('click', function(e) {
+  const input = document.getElementById('global-search-input');
+  const results = document.getElementById('global-search-results');
+  if (input && results && !input.contains(e.target) && !results.contains(e.target)) {
+    results.style.display = 'none';
+  }
+});
+
 function logout() {
   // Microsoftアカウントからもサインアウト
   const accounts = msalInstance.getAllAccounts();
@@ -1495,16 +1636,16 @@ async function initApp() {
       if (token) {
         await loadFromSharePoint();
       } else {
-        showToast('ローカルデータで動作中（☁️SP接続ボタンで再接続）', 'error');
+        showToast('ローカルデータで動作中', 'error');
       }
     }
-    renderDashboard();
-    renderStaffTable();
+    if (document.getElementById('dash-stats')) renderDashboard();
+    if (document.getElementById('staff-table-body')) renderStaffTable();
   } catch(e) {
     console.warn('SharePoint接続スキップ:', e);
-    showToast('ローカルデータで動作中（☁️SP接続ボタンで再接続）', 'error');
-    renderDashboard();
-    renderStaffTable();
+    showToast('ローカルデータで動作中', 'error');
+    if (document.getElementById('dash-stats')) renderDashboard();
+    if (document.getElementById('staff-table-body')) renderStaffTable();
   }
 }
 
@@ -2440,7 +2581,6 @@ function renderStaffTable() {
         </span>
         `}
       </td>
-      <td>${s.area}</td>
       <td>${s.created}</td>
       <td class="td-actions">
         ${canEdit?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteStaff(${s.id})" title="削除">🗑</button>`:''}
@@ -2453,7 +2593,7 @@ function renderStaffTable() {
 function openAddStaffModal() {
   document.getElementById('st-name').value = '';
   document.getElementById('st-role').value = '営業';
-  document.getElementById('st-area').value = '在宅・施設';
+  // area removed
   document.getElementById('st-pass').value = '1234';
   openModal('modal-staff');
 }
@@ -2470,7 +2610,7 @@ function saveStaff() {
   const isAdmin = ['社長','所長','管理者'].includes(role);
   DB.staff.push({
     id: Date.now(), name, fullname, email, role,
-    area: document.getElementById('st-area').value,
+    area: '',
     canEditOrder: isAdmin,
     canEditUser: isAdmin,
     canAdmin: isAdmin,
