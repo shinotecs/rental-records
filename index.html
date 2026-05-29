@@ -338,7 +338,7 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-title">🏥 記録管理システム</div>
   <div class="ls-sub">福祉用具　記録管理</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
-  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v4-syntaxfix</div>
+  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v5-nullcheck</div>
 </div>
 
 <!-- 🔧【最重要】MSALに依存しない早期ブートストラップ -->
@@ -383,7 +383,7 @@ tr:hover td { background: var(--gray-50); }
         </button>
       </div>
       <div id="login-error" style="margin-top:12px;font-size:12px;color:var(--danger);display:none;word-break:break-all;text-align:left;"></div>
-      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v4-syntaxfix</div>
+      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v5-nullcheck</div>
     </div>
   </div>
 </div>
@@ -1680,7 +1680,7 @@ async function onMSAuthSuccess(account) {
 // 🔧 早期ブートストラップ（ヘッダー側のスクリプト）と協調動作
 // DOMContentLoaded で動かす（window.onload より早い）
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('[記録管理システム] build: v4-syntaxfix / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
+  console.log('[記録管理システム] build: v5-nullcheck / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
 
   // 🔧 file://ならエラー画面が出ている → 以降何もしない
   if (IS_FILE_PROTOCOL) return;
@@ -2667,11 +2667,13 @@ function openMemoDetail(memoId) {
 // ======================== ADD/EDIT MODALS ========================
 function populateStaffDatalist() {
   const dl = document.getElementById('staff-list');
+  if (!dl) return; // 🔧 datalistが存在しない場合はスキップ
   dl.innerHTML = DB.staff.map(s=>`<option value="${s.name}">`).join('');
 }
 
 function populateProductDatalist() {
   const dl = document.getElementById('product-list');
+  if (!dl) return; // 🔧 datalistが存在しない場合はスキップ
   dl.innerHTML = DB.masters.products.map(p=>`<option value="${p}">`).join('');
 }
 
