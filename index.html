@@ -338,7 +338,36 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-title">🏥 記録管理システム</div>
   <div class="ls-sub">福祉用具　記録管理</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
+  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v3-bootstrap</div>
 </div>
+
+<!-- 🔧【最重要】MSALに依存しない早期ブートストラップ -->
+<!-- このスクリプトはMSAL CDNより先に実行され、ローディング画面を確実に消す -->
+<script>
+(function(){
+  // 800ms後に必ずローディング画面を隠してログイン画面を表示（MSALの状態に関係なく）
+  function showLoginScreen() {
+    try {
+      var ls = document.getElementById('loading-screen');
+      var lg = document.getElementById('login-screen');
+      if (ls) ls.style.display = 'none';
+      if (lg && !window.__currentUser) lg.style.display = 'block';
+    } catch(e) { console.error('bootstrap切替エラー:', e); }
+  }
+  // DOM準備完了したらタイマー起動
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){
+      setTimeout(showLoginScreen, 800);
+    });
+  } else {
+    setTimeout(showLoginScreen, 800);
+  }
+  // 最終防衛線：5秒後にも強制実行
+  setTimeout(showLoginScreen, 5000);
+  // グローバル公開（後段スクリプトから利用）
+  window.__forceShowLogin = showLoginScreen;
+})();
+</script>
 
 <!-- Login Screen (Microsoft認証中の待機画面) -->
 <div id="login-screen" style="display:none;">
@@ -347,16 +376,14 @@ tr:hover td { background: var(--gray-50); }
       <div style="font-size:40px;margin-bottom:12px;">🏥</div>
       <div style="font-size:20px;font-weight:700;color:var(--primary);margin-bottom:4px;">記録管理システム</div>
       <div style="font-size:13px;color:var(--gray-500);margin-bottom:24px;">福祉用具　記録管理</div>
-      <div style="font-size:13px;color:var(--gray-600);margin-bottom:20px;">Microsoftアカウントでサインインしています...</div>
-      <div style="width:100%;height:4px;background:var(--gray-200);border-radius:2px;overflow:hidden;">
-        <div style="height:100%;background:var(--primary);border-radius:2px;animation:loadBar 1.5s ease-in-out infinite;"></div>
-      </div>
-      <div style="margin-top:20px;">
+      <div style="font-size:13px;color:var(--gray-600);margin-bottom:20px;">Microsoftアカウントでサインインしてください</div>
+      <div style="margin-top:8px;">
         <button onclick="doMSLogin()" style="width:100%;padding:11px;background:var(--primary);color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
           🔑 Microsoftでサインイン
         </button>
       </div>
-      <div id="login-error" style="margin-top:12px;font-size:12px;color:var(--danger);display:none;"></div>
+      <div id="login-error" style="margin-top:12px;font-size:12px;color:var(--danger);display:none;word-break:break-all;text-align:left;"></div>
+      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v3-bootstrap</div>
     </div>
   </div>
 </div>
@@ -1046,6 +1073,49 @@ tr:hover td { background: var(--gray-50); }
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js"></script>
 <script>
+// ======================== 環境判定（最重要） ========================
+// 🔧 file:// プロトコル検知
+//   → ローカルファイルから開かれた場合、Microsoft認証は絶対に動作しないため、
+//     ユーザーに公開URLでのアクセスを促す画面を表示する。
+const IS_FILE_PROTOCOL = window.location.protocol === 'file:';
+const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+const DEPLOYED_URL = 'https://shinotecs.github.io/rental-records/';
+
+// 🔧 file://なら即座にエラー画面を出して以降の処理をスキップ
+if (IS_FILE_PROTOCOL) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const ls = document.getElementById('loading-screen');
+    if (ls) ls.style.display = 'none';
+    document.body.innerHTML = `
+      <div style="position:fixed;inset:0;background:linear-gradient(135deg,#0f4f6b,#1a6b8a);display:flex;align-items:center;justify-content:center;padding:20px;font-family:'Noto Sans JP',sans-serif;">
+        <div style="background:white;border-radius:12px;padding:32px;max-width:500px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+          <div style="font-size:48px;text-align:center;margin-bottom:12px;">⚠️</div>
+          <div style="font-size:18px;font-weight:700;color:#c0392b;text-align:center;margin-bottom:16px;">
+            ローカルファイルからは動作しません
+          </div>
+          <div style="font-size:14px;color:#3c4043;line-height:1.7;margin-bottom:20px;">
+            このアプリは <b>Microsoftアカウント認証</b> を使用するため、
+            <code style="background:#f1f3f4;padding:2px 6px;border-radius:4px;font-size:12px;">file://</code>
+            （ダブルクリックで開いた状態）では動作しません。<br><br>
+            下記の <b>公開URL（HTTPS）</b> からアクセスしてください：
+          </div>
+          <a href="${DEPLOYED_URL}" target="_blank" rel="noopener" style="display:block;background:#1a6b8a;color:white;text-decoration:none;text-align:center;padding:14px;border-radius:8px;font-weight:700;margin-bottom:12px;">
+            🌐 公開ページを開く
+          </a>
+          <div style="font-size:11px;color:#80868b;line-height:1.6;background:#f8f9fa;padding:10px 12px;border-radius:6px;border-left:3px solid #1a6b8a;">
+            <b>なぜ動かないのか：</b><br>
+            Microsoft Azure ADはセキュリティ上、HTTPS環境からの認証のみ許可しています。
+            <code>file://</code> はオリジンが <code>null</code> 扱いになり、認証トークンが返ってきません。<br><br>
+            <b>もしGitHub Pagesがまだ公開されていない場合：</b><br>
+            ローカル開発用に <code>python -m http.server</code> 等で <code>http://localhost</code> 経由で開けば動作します
+            （ただし <code>http://localhost</code> もAzure ADアプリの「リダイレクトURI」に登録が必要）。
+          </div>
+        </div>
+      </div>
+    `;
+  });
+}
+
 // ======================== SHAREPOINT設定 ========================
 const SP_CONFIG = {
   clientId: 'ca06b6ae-562a-48ab-bc55-5bbbe1487147',
@@ -1054,23 +1124,28 @@ const SP_CONFIG = {
   authority: 'https://login.microsoftonline.com/a8d72d1d-0a0b-4de2-968b-43f9f27ffbc3',
 };
 
+// 🔧 redirectUri を安全に計算（file://でも構築は失敗しない）
+function computeRedirectUri() {
+  if (IS_FILE_PROTOCOL) return DEPLOYED_URL; // 構築失敗回避のためのダミー
+  return window.location.origin + window.location.pathname;
+}
+
 const msalConfig = {
   auth: {
     clientId: SP_CONFIG.clientId,
     authority: SP_CONFIG.authority,
-    // 🔧 動的にリダイレクトURIを設定（ローカル・本番どちらでも動作）
-    // ※Azure ADアプリ登録に下記URIを「シングルページ アプリケーション（SPA）」として登録してください
-    //   - https://shinotecs.github.io/rental-records/
-    //   - その他テスト用URLがあれば追加
-    redirectUri: window.location.origin + window.location.pathname,
+    // ※Azure ADアプリ登録の「認証」→「シングルページアプリケーション(SPA)」に
+    //   このURIと完全一致するエントリが必要です:
+    //   https://shinotecs.github.io/rental-records/
+    redirectUri: computeRedirectUri(),
     navigateToLoginRequestUrl: false,
   },
   cache: {
     cacheLocation: 'localStorage',
-    storeAuthStateInCookie: false, // モバイルSafariでCookie保存はITP対策で逆効果
+    storeAuthStateInCookie: false, // iOS Safari ITP対策（trueだと逆効果）
   },
   system: {
-    tokenRenewalOffsetSeconds: 300, // 期限5分前に自動更新
+    tokenRenewalOffsetSeconds: 300,
     loggerOptions: {
       loggerCallback: (level, message) => {
         if (level <= 1) console.warn('[MSAL]', message);
@@ -1079,17 +1154,34 @@ const msalConfig = {
   },
 };
 
-const msalInstance = new msal.PublicClientApplication(msalConfig);
+// 🔧 MSAL構築失敗時のダミー実装（スクリプト全体停止を防止）
+const noopMsal = {
+  initialize: () => Promise.resolve(),
+  handleRedirectPromise: () => Promise.resolve(null),
+  getAllAccounts: () => [],
+  acquireTokenSilent: () => Promise.reject(new Error('MSAL未初期化')),
+  acquireTokenPopup: () => Promise.reject(new Error('MSAL未初期化')),
+  acquireTokenRedirect: () => Promise.reject(new Error('MSAL未初期化')),
+  loginRedirect: () => Promise.reject(new Error('MSAL未初期化')),
+  loginPopup: () => Promise.reject(new Error('MSAL未初期化')),
+  logoutPopup: () => Promise.resolve(),
+  logoutRedirect: () => Promise.resolve(),
+};
 
-// 🔧【最重要修正】Microsoft Graph API用のスコープに変更
-// 旧: ['https://shinotecs.sharepoint.com/.default'] ← SharePoint REST用トークン
-// 新: Graph API用トークン（コード内のfetch先と一致させる）
-// ※Azure ADアプリのAPIアクセス許可に「Microsoft Graph > Sites.ReadWrite.All（委任）」を追加し、
-//   管理者の同意が必要です。
+// 🔧 try-catchで構築（例外が出てもスクリプト続行）
+let msalInstance;
+try {
+  msalInstance = new msal.PublicClientApplication(msalConfig);
+} catch(e) {
+  console.error('MSAL構築エラー（ダミーで継続）:', e);
+  msalInstance = noopMsal;
+}
+
+// 🔧【最重要修正】Microsoft Graph API用のスコープ
+// ※Azure ADアプリの「APIのアクセス許可」に
+//   「Microsoft Graph > 委任 > Sites.ReadWrite.All」を追加し、
+//   「[テナント] に管理者の同意を与えます」をクリックしてください。
 const SP_SCOPES = ['Sites.ReadWrite.All'];
-
-// 🔧 モバイル判定（ポップアップが機能しないためリダイレクト方式を使用）
-const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
 // MSAL初期化完了Promise（ボタンクリック前に必ず完了させる）
 let msalReady = null;
@@ -1517,8 +1609,21 @@ async function doMSLogin() {
   const btn = document.querySelector('#login-screen button');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 認証中...'; }
   try {
+    // 🔧 file:// チェック（万が一ここまで到達した場合）
+    if (IS_FILE_PROTOCOL) {
+      throw new Error('ローカルファイルからは認証できません。https:// で開いてください。');
+    }
+    // 🔧 MSALダミー実装の場合は明示的に失敗
+    if (msalInstance === noopMsal) {
+      throw new Error('MSAL未読込（ネットワーク・CDN障害の可能性）。ページを再読込してください。');
+    }
+    // 🔧 MSAL初期化が未着手なら今ここで開始（onloadより前にユーザーがクリックした場合）
+    if (!msalReady) {
+      console.log('[Login] MSAL未初期化、ここで初期化');
+      msalReady = initMSALBackground();
+    }
     // 🔧 MSAL初期化完了を必ず待つ
-    if (msalReady) await msalReady;
+    await msalReady;
 
     // 🔧 モバイルではリダイレクト方式（ポップアップは確実にブロックされる）
     if (IS_MOBILE) {
@@ -1572,42 +1677,51 @@ async function onMSAuthSuccess(account) {
   await initApp();
 }
 
-window.onload = function() {
-  // 🔧 MSAL初期化を window.onload と同時開始（ボタンクリック前に必ず完了させる）
-  msalReady = initMSALBackground();
+// 🔧 早期ブートストラップ（ヘッダー側のスクリプト）と協調動作
+// DOMContentLoaded で動かす（window.onload より早い）
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('[記録管理システム] build: v3-bootstrap / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
 
-  setTimeout(() => {
-    document.getElementById('loading-screen').style.display = 'none';
-    // 自動ログインが既に成功していれば login-screen は表示しない
-    if (!currentUser) {
-      document.getElementById('login-screen').style.display = 'block';
-    }
-  }, 1200);
-};
+  // 🔧 file://ならエラー画面が出ている → 以降何もしない
+  if (IS_FILE_PROTOCOL) return;
+
+  // 🔧 MSAL初期化を非同期で開始（例外は内部で吸収）
+  try {
+    msalReady = initMSALBackground();
+  } catch(e) {
+    console.error('initMSALBackground呼び出し失敗:', e);
+    msalReady = Promise.resolve();
+  }
+  // ローディング消去・ログイン表示は早期ブートストラップが800ms後に必ず実行するので、
+  // ここでは何もしなくてOK
+});
 
 async function initMSALBackground() {
   try {
+    console.log('[MSAL] initialize開始');
     await msalInstance.initialize();
+    console.log('[MSAL] initialize完了');
 
-    // 🔧 リダイレクトからの戻りを最優先で処理（スマホからの認証完了時）
+    // 🔧 リダイレクトからの戻りを最優先で処理（スマホ・PCリダイレクト両対応）
     let redirectResult = null;
     try {
       redirectResult = await msalInstance.handleRedirectPromise();
+      console.log('[MSAL] handleRedirectPromise:', redirectResult ? 'account取得' : '通常起動');
     } catch(e) {
       console.warn('handleRedirectPromise error:', e);
     }
 
     if (redirectResult && redirectResult.account) {
       spToken = redirectResult.accessToken;
-      // ローディング画面を即座に消してログイン処理へ
       const ls = document.getElementById('loading-screen');
       if (ls) ls.style.display = 'none';
       await onMSAuthSuccess(redirectResult.account);
       return;
     }
 
-    // 既存セッションがあれば自動ログイン（サイレント）
+    // 既存セッションがあればサイレント自動ログイン
     const accounts = msalInstance.getAllAccounts();
+    console.log('[MSAL] 既存アカウント:', accounts.length, '件');
     if (accounts.length > 0) {
       try {
         const result = await msalInstance.acquireTokenSilent({
