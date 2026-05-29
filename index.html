@@ -1058,12 +1058,16 @@ const msalConfig = {
   auth: {
     clientId: SP_CONFIG.clientId,
     authority: SP_CONFIG.authority,
-    redirectUri: 'https://shinotecs.github.io/rental-records/',
-    navigateToLoginRequestUrl: false, // リダイレクトループ防止
+    // 🔧 動的にリダイレクトURIを設定（ローカル・本番どちらでも動作）
+    // ※Azure ADアプリ登録に下記URIを「シングルページ アプリケーション（SPA）」として登録してください
+    //   - https://shinotecs.github.io/rental-records/
+    //   - その他テスト用URLがあれば追加
+    redirectUri: window.location.origin + window.location.pathname,
+    navigateToLoginRequestUrl: false,
   },
   cache: {
     cacheLocation: 'localStorage',
-    storeAuthStateInCookie: true,
+    storeAuthStateInCookie: false, // モバイルSafariでCookie保存はITP対策で逆効果
   },
   system: {
     tokenRenewalOffsetSeconds: 300, // 期限5分前に自動更新
@@ -1073,22 +1077,31 @@ const msalConfig = {
       },
     },
   },
-  system: {
-    loggerOptions: {
-      loggerCallback: (level, message) => {
-        if (level <= 1) console.warn('[MSAL]', message); // エラー・警告のみログ
-      },
-    },
-  },
 };
 
 const msalInstance = new msal.PublicClientApplication(msalConfig);
-const SP_SCOPES = ['https://shinotecs.sharepoint.com/.default'];
+
+// 🔧【最重要修正】Microsoft Graph API用のスコープに変更
+// 旧: ['https://shinotecs.sharepoint.com/.default'] ← SharePoint REST用トークン
+// 新: Graph API用トークン（コード内のfetch先と一致させる）
+// ※Azure ADアプリのAPIアクセス許可に「Microsoft Graph > Sites.ReadWrite.All（委任）」を追加し、
+//   管理者の同意が必要です。
+const SP_SCOPES = ['Sites.ReadWrite.All'];
+
+// 🔧 モバイル判定（ポップアップが機能しないためリダイレクト方式を使用）
+const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+// MSAL初期化完了Promise（ボタンクリック前に必ず完了させる）
+let msalReady = null;
 
 let spToken = null;
 let spSiteId = null;
 
 async function getSPToken() {
+  // MSAL初期化完了を待つ
+  if (msalReady) {
+    try { await msalReady; } catch(e) {}
+  }
   // サイレント取得を試みる
   try {
     const accounts = msalInstance.getAllAccounts();
@@ -1102,21 +1115,30 @@ async function getSPToken() {
       return spToken;
     }
   } catch(e) {
-    // サイレント失敗時はポップアップへフォールバック
     console.warn('Silent token acquisition failed:', e);
+    // interaction_required の場合は対話型認証へフォールバック
   }
-  // ポップアップで認証
+  // 🔧 モバイルではリダイレクト、PCではポップアップ
   try {
-    const result = await msalInstance.acquireTokenPopup({
-      scopes: SP_SCOPES,
-      prompt: 'select_account',
-    });
-    spToken = result.accessToken;
-    return spToken;
+    if (IS_MOBILE) {
+      // リダイレクトはこの後ページ遷移するため、Promiseは解決しない
+      await msalInstance.acquireTokenRedirect({
+        scopes: SP_SCOPES,
+        prompt: 'select_account',
+      });
+      return null; // リダイレクト発生
+    } else {
+      const result = await msalInstance.acquireTokenPopup({
+        scopes: SP_SCOPES,
+        prompt: 'select_account',
+      });
+      spToken = result.accessToken;
+      return spToken;
+    }
   } catch(e) {
-    console.error('Popup token acquisition failed:', e);
+    console.error('Token acquisition failed:', e);
     if (e.errorCode !== 'user_cancelled') {
-      showToast('SharePoint認証に失敗: ' + (e.errorMessage || e.message || e.errorCode), 'error');
+      showToast('認証エラー: ' + (e.errorMessage || e.message || e.errorCode || '不明'), 'error');
     }
     return null;
   }
@@ -1125,45 +1147,96 @@ async function getSPToken() {
 async function spGet(path) {
   const token = await getSPToken();
   if (!token) return null;
-  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
-  });
-  if (!res.ok) return null;
-  return await res.json();
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(()=>'');
+      console.error(`[SP GET ${path}] ${res.status}`, body);
+      return null;
+    }
+    return await res.json();
+  } catch(e) {
+    console.error(`[SP GET ${path}] network error`, e);
+    return null;
+  }
 }
 
 async function spPost(path, body) {
   const token = await getSPToken();
-  if (!token) return null;
-  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) return null;
-  return await res.json();
+  if (!token) { showToast('未認証のため保存できません', 'error'); return null; }
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(()=>'');
+      console.error(`[SP POST ${path}] ${res.status}`, errText);
+      // ユーザーに具体的なエラーを表示
+      let msg = `保存失敗 (${res.status})`;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error && errJson.error.message) msg += ': ' + errJson.error.message;
+      } catch(_) {}
+      showToast(msg, 'error');
+      return null;
+    }
+    return await res.json();
+  } catch(e) {
+    console.error(`[SP POST ${path}] network error`, e);
+    showToast('ネットワークエラー: ' + (e.message || ''), 'error');
+    return null;
+  }
 }
 
 async function spPatch(path, body) {
   const token = await getSPToken();
-  if (!token) return null;
-  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) return null;
-  return await res.json();
+  if (!token) { showToast('未認証のため更新できません', 'error'); return null; }
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(()=>'');
+      console.error(`[SP PATCH ${path}] ${res.status}`, errText);
+      let msg = `更新失敗 (${res.status})`;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error && errJson.error.message) msg += ': ' + errJson.error.message;
+      } catch(_) {}
+      showToast(msg, 'error');
+      return null;
+    }
+    return await res.json();
+  } catch(e) {
+    console.error(`[SP PATCH ${path}] network error`, e);
+    showToast('ネットワークエラー: ' + (e.message || ''), 'error');
+    return null;
+  }
 }
 
 async function spDelete(path) {
   const token = await getSPToken();
   if (!token) return false;
-  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  return res.ok;
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(()=>'');
+      console.error(`[SP DELETE ${path}] ${res.status}`, errText);
+    }
+    return res.ok;
+  } catch(e) {
+    console.error(`[SP DELETE ${path}] network error`, e);
+    return false;
+  }
 }
 
 async function getSiteId() {
@@ -1439,8 +1512,24 @@ function getStaffByEmail(email) {
 
 // Microsoftサインインボタン押下
 async function doMSLogin() {
-  document.getElementById('login-error').style.display = 'none';
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  const btn = document.querySelector('#login-screen button');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 認証中...'; }
   try {
+    // 🔧 MSAL初期化完了を必ず待つ
+    if (msalReady) await msalReady;
+
+    // 🔧 モバイルではリダイレクト方式（ポップアップは確実にブロックされる）
+    if (IS_MOBILE) {
+      await msalInstance.loginRedirect({
+        scopes: SP_SCOPES,
+        prompt: 'select_account',
+      });
+      return; // この後ページ遷移
+    }
+
+    // PCはポップアップ
     const result = await msalInstance.acquireTokenPopup({
       scopes: SP_SCOPES,
       prompt: 'select_account',
@@ -1448,11 +1537,12 @@ async function doMSLogin() {
     spToken = result.accessToken;
     await onMSAuthSuccess(result.account);
   } catch(e) {
+    console.error('Login error:', e);
     if (e.errorCode !== 'user_cancelled') {
-      const errEl = document.getElementById('login-error');
-      errEl.textContent = 'サインインに失敗しました: ' + (e.errorMessage || e.message || e.errorCode);
+      errEl.textContent = 'サインインに失敗: ' + (e.errorMessage || e.message || e.errorCode || '不明なエラー');
       errEl.style.display = 'block';
     }
+    if (btn) { btn.disabled = false; btn.textContent = '🔑 Microsoftでサインイン'; }
   }
 }
 
@@ -1464,11 +1554,12 @@ async function onMSAuthSuccess(account) {
     const errEl = document.getElementById('login-error');
     errEl.textContent = 'このアカウント（' + email + '）はシステムに登録されていません。管理者に連絡してください。';
     errEl.style.display = 'block';
+    const btn = document.querySelector('#login-screen button');
+    if (btn) { btn.disabled = false; btn.textContent = '🔑 Microsoftでサインイン'; }
     return;
   }
   currentUser = staff.name;
   currentRole = staff.role;
-  // 権限フラグをセット
   currentPerms = {
     canEditOrder: staff.canEditOrder || false,
     canEditUser:  staff.canEditUser  || false,
@@ -1477,53 +1568,63 @@ async function onMSAuthSuccess(account) {
   document.getElementById('current-user').textContent = staff.fullname || staff.name;
   document.getElementById('current-role').textContent = currentRole;
   document.getElementById('login-screen').style.display = 'none';
-  // 管理者メニューの表示制御
   document.getElementById('admin-menu').style.display = currentPerms.canAdmin ? 'block' : 'none';
   await initApp();
 }
 
 window.onload = function() {
-  // ① まずローディングを消してサインイン画面を即表示（絶対に固まらない）
+  // 🔧 MSAL初期化を window.onload と同時開始（ボタンクリック前に必ず完了させる）
+  msalReady = initMSALBackground();
+
   setTimeout(() => {
     document.getElementById('loading-screen').style.display = 'none';
-    document.getElementById('login-screen').style.display = 'block';
-    // ② バックグラウンドでMSAL初期化を試みる（成功すれば自動ログイン）
-    initMSALBackground();
+    // 自動ログインが既に成功していれば login-screen は表示しない
+    if (!currentUser) {
+      document.getElementById('login-screen').style.display = 'block';
+    }
   }, 1200);
 };
 
 async function initMSALBackground() {
   try {
-    await Promise.race([
-      msalInstance.initialize(),
-      new Promise(resolve => setTimeout(resolve, 3000))
-    ]);
-    try {
-      await Promise.race([
-        msalInstance.handleRedirectPromise(),
-        new Promise(resolve => setTimeout(resolve, 2000))
-      ]);
-    } catch(e) {}
+    await msalInstance.initialize();
 
-    // 既存セッションがあれば自動ログイン
+    // 🔧 リダイレクトからの戻りを最優先で処理（スマホからの認証完了時）
+    let redirectResult = null;
+    try {
+      redirectResult = await msalInstance.handleRedirectPromise();
+    } catch(e) {
+      console.warn('handleRedirectPromise error:', e);
+    }
+
+    if (redirectResult && redirectResult.account) {
+      spToken = redirectResult.accessToken;
+      // ローディング画面を即座に消してログイン処理へ
+      const ls = document.getElementById('loading-screen');
+      if (ls) ls.style.display = 'none';
+      await onMSAuthSuccess(redirectResult.account);
+      return;
+    }
+
+    // 既存セッションがあれば自動ログイン（サイレント）
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
       try {
-        const result = await Promise.race([
-          msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: accounts[0], forceRefresh: false }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
-        ]);
+        const result = await msalInstance.acquireTokenSilent({
+          scopes: SP_SCOPES,
+          account: accounts[0],
+          forceRefresh: false,
+        });
         spToken = result.accessToken;
-        // サインイン画面がまだ表示中なら自動でログイン処理へ
-        if (document.getElementById('login-screen').style.display !== 'none') {
+        if (!currentUser) {
           await onMSAuthSuccess(accounts[0]);
         }
       } catch(e) {
-        console.warn('Auto login failed, manual sign-in required:', e);
+        console.warn('自動ログイン失敗（手動サインインが必要）:', e);
       }
     }
   } catch(e) {
-    console.warn('MSAL background init failed:', e);
+    console.warn('MSAL初期化失敗:', e);
   }
 }
 
@@ -1882,6 +1983,11 @@ function logout() {
   const accounts = msalInstance.getAllAccounts();
   currentUser = null; currentRole = null; spToken = null;
   if (accounts.length > 0) {
+    // 🔧 モバイルではリダイレクト方式（ポップアップは機能しない）
+    if (IS_MOBILE) {
+      msalInstance.logoutRedirect({ account: accounts[0] }).catch(() => {});
+      return;
+    }
     msalInstance.logoutPopup({ account: accounts[0] }).catch(() => {});
   }
   document.getElementById('login-screen').style.display = 'block';
