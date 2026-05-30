@@ -338,7 +338,7 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-title">🏥 記録管理システム</div>
   <div class="ls-sub">福祉用具　記録管理</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
-  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v8-stable</div>
+  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v9-diag</div>
 </div>
 
 <!-- 🔧【最重要】MSALに依存しない早期ブートストラップ -->
@@ -406,7 +406,7 @@ tr:hover td { background: var(--gray-50); }
           サインインで詰まった場合：セッションクリアして再試行
         </a>
       </div>
-      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v8-stable</div>
+      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v9-diag</div>
     </div>
   </div>
 </div>
@@ -1411,94 +1411,201 @@ async function updateListItem(listName, itemId, fields) {
   return await spPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, fields);
 }
 
-// 🔧 SharePoint診断機能（保存失敗時にユーザーに案内するため）
+// 🔧【v9】SharePoint診断機能（リダイレクトを絶対に起こさない安全版）
 async function diagnoseSp() {
+  console.log('[SP診断] 開始');
+  // 🔧 最初にローディングモーダルを表示（クリック反応の確認も兼ねる）
+  showSpDiagnosisLoading();
+
   const results = [];
   function add(label, ok, detail) {
     results.push({ label, ok, detail });
+    console.log(`[SP診断] ${ok?'✅':'❌'} ${label}: ${detail}`);
   }
 
-  // 1. トークン
-  const token = await getSPToken();
-  add('1. アクセストークン取得', !!token, token ? '✅ 成功' : '❌ MSAL認証が動いていない');
-  if (!token) return showSpDiagnosis(results);
-
-  // 2. トークン中身（スコープ確認）
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    const scopes = payload.scp || '(なし)';
-    const hasGraphSites = /Sites\.\w+\.All/i.test(scopes);
-    add('2. Graph APIスコープ', hasGraphSites, `付与: ${scopes}`);
-  } catch(e) { add('2. トークン解析', false, e.message); }
-
-  // 3. サイト取得
-  spSiteId = null; // キャッシュリセット
-  const siteData = await spGet('/sites/shinotecs.sharepoint.com:/sites/snt002');
-  add('3. SharePointサイト', !!siteData, siteData ? `✅ ID=${siteData.id?.slice(0,40)}...` : '❌ サイト未検出。URL or 権限を確認');
-  if (!siteData) return showSpDiagnosis(results);
-
-  // 4. 全リスト一覧
-  const allLists = await spGet(`/sites/${siteData.id}/lists?$top=100`);
-  const listNames = allLists?.value?.map(l => l.displayName) || [];
-  add('4. サイト内リスト一覧', listNames.length > 0, listNames.length ? `(${listNames.length}件) ${listNames.join(', ')}` : '❌ リストが見つからない');
-
-  // 5. 期待するリストの有無
-  const expected = ['利用者マスタ', '営業メモ', '商品レンタル', '販売改修'];
-  for (const name of expected) {
-    const found = listNames.includes(name);
-    add(`5. リスト「${name}」`, found, found ? '✅ 存在' : `❌ なし（このリストを作成してください）`);
-  }
-
-  // 6. テスト書き込み（利用者マスタが存在する場合のみ）
-  if (listNames.includes('利用者マスタ')) {
-    const testFields = { Title: '__診断テスト__' + Date.now() };
-    const listId = (allLists.value.find(l => l.displayName === '利用者マスタ'))?.id;
-    if (listId) {
-      const testResult = await spPost(`/sites/${siteData.id}/lists/${listId}/items`, { fields: testFields });
-      add('6. テスト書き込み', !!testResult,
-        testResult ? `✅ ID=${testResult.id} （手動で削除してください）` :
-        '❌ 書き込み失敗。フィールド名 or 書込権限の問題');
+    // 1. アカウント確認（リダイレクトを起こさない）
+    let accounts = [];
+    try {
+      accounts = msalInstance.getAllAccounts();
+    } catch(e) {
+      add('1. MSALアカウント取得', false, 'getAllAccounts例外: ' + e.message);
+      return showSpDiagnosis(results);
     }
+    add('1. MSALアカウント', accounts.length > 0,
+      accounts.length > 0 ? `✅ ${accounts[0].username}` : '❌ ログイン情報なし');
+    if (accounts.length === 0) return showSpDiagnosis(results);
+
+    // 2. トークン取得（サイレントのみ、絶対にリダイレクトしない）
+    let token = null;
+    try {
+      const result = await msalInstance.acquireTokenSilent({
+        scopes: SP_SCOPES,
+        account: accounts[0],
+        forceRefresh: false,
+      });
+      token = result.accessToken;
+      add('2. アクセストークン取得', true, '✅ サイレント取得成功');
+    } catch(e) {
+      add('2. アクセストークン取得', false,
+        `❌ サイレント失敗: ${e.errorCode||e.message}. 一度ログアウト→再ログインで Sites.ReadWrite.All の同意が必要`);
+      return showSpDiagnosis(results);
+    }
+
+    // 3. トークンスコープ解析
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const scopes = payload.scp || '(なし)';
+      const aud = payload.aud || '(不明)';
+      const hasGraphSites = /Sites\.\w+\.All/i.test(scopes);
+      add('3. トークン権限 (scp)', hasGraphSites,
+        `aud=${aud} / scp=${scopes}`);
+    } catch(e) { add('3. トークン解析', false, e.message); }
+
+    // 4. サイト取得
+    spSiteId = null;
+    let siteData = null;
+    try {
+      const res = await fetch('https://graph.microsoft.com/v1.0/sites/shinotecs.sharepoint.com:/sites/snt002', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        siteData = await res.json();
+        add('4. SharePointサイト取得', true, `✅ ID=${siteData.id?.slice(0,50)}`);
+      } else {
+        const errText = await res.text().catch(()=>'');
+        add('4. SharePointサイト取得', false, `❌ ${res.status}: ${errText.slice(0,200)}`);
+        return showSpDiagnosis(results);
+      }
+    } catch(e) {
+      add('4. SharePointサイト取得', false, '❌ ネットワークエラー: ' + e.message);
+      return showSpDiagnosis(results);
+    }
+
+    // 5. 全リスト一覧
+    let allLists = null;
+    try {
+      const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteData.id}/lists?$top=100`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        allLists = await res.json();
+        const names = allLists.value?.map(l => l.displayName) || [];
+        add('5. サイト内リスト一覧', names.length > 0,
+          names.length ? `(${names.length}件) ${names.join(' / ')}` : '❌ リストが0件');
+      } else {
+        const errText = await res.text().catch(()=>'');
+        add('5. サイト内リスト一覧', false, `❌ ${res.status}: ${errText.slice(0,200)}`);
+        return showSpDiagnosis(results);
+      }
+    } catch(e) {
+      add('5. サイト内リスト一覧', false, '❌ ' + e.message);
+      return showSpDiagnosis(results);
+    }
+
+    // 6. 期待するリスト4つの有無
+    const listNames = allLists.value.map(l => l.displayName);
+    const expected = ['利用者マスタ', '営業メモ', '商品レンタル', '販売改修'];
+    for (const name of expected) {
+      const found = listNames.includes(name);
+      add(`6. リスト「${name}」`, found,
+        found ? '✅ 存在する' : '❌ なし。SharePointサイトにこの名前でリストを作成してください');
+    }
+
+    // 7. テスト書き込み（利用者マスタがある場合のみ）
+    if (listNames.includes('利用者マスタ')) {
+      const targetList = allLists.value.find(l => l.displayName === '利用者マスタ');
+      try {
+        const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteData.id}/lists/${targetList.id}/items`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { Title: '__診断テスト__' + Date.now() } })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          add('7. テスト書き込み', true,
+            `✅ 書込成功 ID=${data.id}（後でSharePointから手動削除してください）`);
+        } else {
+          const errText = await res.text().catch(()=>'');
+          add('7. テスト書き込み', false,
+            `❌ ${res.status}: ${errText.slice(0,300)}`);
+        }
+      } catch(e) {
+        add('7. テスト書き込み', false, '❌ ' + e.message);
+      }
+    }
+  } catch(e) {
+    console.error('[SP診断] 予期せぬエラー:', e);
+    results.push({ label: '予期せぬエラー', ok: false, detail: e.message + '\n' + e.stack });
   }
 
   showSpDiagnosis(results);
 }
 
+function showSpDiagnosisLoading() {
+  const existing = document.getElementById('sp-diag-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'sp-diag-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = '<div style="background:white;border-radius:12px;padding:32px;text-align:center;font-family:sans-serif;"><div style="font-size:18px;font-weight:700;margin-bottom:8px;">🔧 SharePoint診断中...</div><div style="color:#666;font-size:13px;">数秒お待ちください</div></div>';
+  document.body.appendChild(modal);
+  console.log('[SP診断] ローディング表示 OK');
+}
+
+// 🔧【v9】モーダル表示。CSS変数依存を全削除し、確実に表示される実装
 function showSpDiagnosis(results) {
-  // 結果をモーダルで表示
-  let html = '<div style="font-family:monospace;font-size:12px;line-height:1.6;">';
+  console.log('[SP診断] モーダル表示開始 / 結果件数:', results.length);
+
+  // CSS変数に依存しないハードコード色
+  const C_OK_BG = '#d1fae5', C_OK_BORDER = '#10b981', C_OK_TEXT = '#065f46';
+  const C_NG_BG = '#fee2e2', C_NG_BORDER = '#dc2626', C_NG_TEXT = '#991b1b';
+
+  let html = '<div style="font-family:Meiryo,sans-serif;font-size:12px;line-height:1.6;">';
   for (const r of results) {
     const icon = r.ok ? '✅' : '❌';
-    const color = r.ok ? 'var(--success)' : 'var(--danger)';
-    html += `<div style="margin-bottom:8px;padding:8px;background:${r.ok?'var(--success-light)':'var(--danger-light)'};border-radius:4px;border-left:3px solid ${color};">`;
-    html += `<div style="font-weight:700;color:${color};">${icon} ${r.label}</div>`;
-    html += `<div style="font-size:11px;color:var(--gray-700);margin-top:2px;word-break:break-all;">${r.detail}</div>`;
+    const bg = r.ok ? C_OK_BG : C_NG_BG;
+    const bd = r.ok ? C_OK_BORDER : C_NG_BORDER;
+    const tc = r.ok ? C_OK_TEXT : C_NG_TEXT;
+    const safeDetail = String(r.detail || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    html += `<div style="margin-bottom:8px;padding:10px;background:${bg};border-radius:6px;border-left:4px solid ${bd};">`;
+    html += `<div style="font-weight:700;color:${tc};margin-bottom:4px;">${icon} ${r.label}</div>`;
+    html += `<div style="font-size:11px;color:#444;word-break:break-all;white-space:pre-wrap;">${safeDetail}</div>`;
     html += '</div>';
   }
   html += '</div>';
 
-  // 既存モーダルがあれば閉じる
   const existing = document.getElementById('sp-diag-modal');
   if (existing) existing.remove();
 
   const modal = document.createElement('div');
   modal.id = 'sp-diag-modal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  // 🔧 z-index 99999、inset の代わりに個別指定（古いブラウザ対応）
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;font-family:Meiryo,sans-serif;';
+
   modal.innerHTML = `
-    <div style="background:white;border-radius:12px;padding:24px;max-width:700px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <div style="font-size:18px;font-weight:700;">📋 SharePoint 接続診断</div>
-        <button onclick="document.getElementById('sp-diag-modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-600);">✕</button>
+    <div style="background:white;border-radius:12px;padding:24px;max-width:780px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e5e7eb;">
+        <div style="font-size:18px;font-weight:700;color:#1a6b8a;">📋 SharePoint 接続診断結果</div>
+        <button id="sp-diag-close-x" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666;padding:0 8px;">✕</button>
       </div>
       ${html}
-      <div style="margin-top:16px;padding:12px;background:var(--primary-light);border-radius:6px;font-size:12px;color:var(--gray-700);">
-        <b>❌ がある項目を修正すると保存が動くようになります。</b><br>
-        詳細はF12 → Consoleタブも参照してください。
+      <div style="margin-top:16px;padding:12px;background:#eff6ff;border-radius:6px;font-size:12px;color:#1e40af;border-left:4px solid #3b82f6;">
+        <b>使い方：</b><br>
+        ❌ の項目を順番に修正してください。詳細は F12 → Console タブにも出力されています。
       </div>
-      <button onclick="document.getElementById('sp-diag-modal').remove()" style="margin-top:12px;width:100%;padding:10px;background:var(--primary);color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer;">閉じる</button>
+      <button id="sp-diag-close-btn" style="margin-top:16px;width:100%;padding:12px;background:#1a6b8a;color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;">閉じる</button>
     </div>
   `;
   document.body.appendChild(modal);
+
+  // 🔧 イベントリスナーを直接アタッチ（onclick属性より確実）
+  const closeBtn = document.getElementById('sp-diag-close-btn');
+  const closeX = document.getElementById('sp-diag-close-x');
+  if (closeBtn) closeBtn.onclick = () => modal.remove();
+  if (closeX) closeX.onclick = () => modal.remove();
+
+  console.log('[SP診断] モーダル表示完了');
 }
 
 async function deleteListItem(listName, itemId) {
@@ -1833,7 +1940,7 @@ async function onMSAuthSuccess(account) {
 // 🔧 早期ブートストラップ（ヘッダー側のスクリプト）と協調動作
 // DOMContentLoaded で動かす（window.onload より早い）
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('[記録管理システム] build: v8-stable / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
+  console.log('[記録管理システム] build: v9-diag / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
 
   // 🔧 file://ならエラー画面が出ている → 以降何もしない
   if (IS_FILE_PROTOCOL) return;
