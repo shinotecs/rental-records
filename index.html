@@ -338,7 +338,7 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-title">🏥 記録管理システム</div>
   <div class="ls-sub">福祉用具　記録管理</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
-  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v9-diag</div>
+  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v10-fieldmap</div>
 </div>
 
 <!-- 🔧【最重要】MSALに依存しない早期ブートストラップ -->
@@ -406,7 +406,7 @@ tr:hover td { background: var(--gray-50); }
           サインインで詰まった場合：セッションクリアして再試行
         </a>
       </div>
-      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v9-diag</div>
+      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v10-fieldmap</div>
     </div>
   </div>
 </div>
@@ -1394,10 +1394,11 @@ async function addListItem(listName, fields) {
   if (!siteId) return null;
   const listId = await getListId(listName);
   if (!listId) return null;
-  console.log(`[SP] addListItem ${listName}:`, fields);
-  const result = await spPost(`/sites/${siteId}/lists/${listId}/items`, { fields });
+  // 🔧【v10】表示名→内部名に自動翻訳してから書き込む
+  const translated = await translateFields(listName, fields);
+  console.log(`[SP] addListItem ${listName}:`, translated);
+  const result = await spPost(`/sites/${siteId}/lists/${listId}/items`, { fields: translated });
   if (!result) {
-    // spPostは既に詳細エラーをトースト表示済み
     console.error(`[SP] addListItem失敗 list=${listName}`);
   }
   return result;
@@ -1408,7 +1409,55 @@ async function updateListItem(listName, itemId, fields) {
   const siteId = await getSiteId();
   const listId = await getListId(listName);
   if (!siteId || !listId) return null;
-  return await spPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, fields);
+  // 🔧【v10】表示名→内部名に自動翻訳してから更新
+  const translated = await translateFields(listName, fields);
+  return await spPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, translated);
+}
+
+// 🔧【v10】列マッピング機能（日本語列名対応）
+// SharePointで日本語の列名を作ると内部名はエンコードされる（カテゴリ→OData_x30AB_x30C6_x30B4_x30EA_など）
+// Graph APIは内部名を要求するため、表示名→内部名の対応表を取得しておく
+const spColumnMaps = {}; // {listName: {displayName: internalName}}
+
+async function getListColumns(listName) {
+  if (spColumnMaps[listName]) return spColumnMaps[listName];
+  const siteId = await getSiteId();
+  const listId = await getListId(listName);
+  if (!siteId || !listId) return null;
+  const data = await spGet(`/sites/${siteId}/lists/${listId}/columns?$top=200`);
+  if (!data || !data.value) {
+    console.warn(`[SP] ${listName} 列定義取得失敗`);
+    return null;
+  }
+  const map = {};
+  for (const col of data.value) {
+    if (col.displayName && col.name) {
+      map[col.displayName] = col.name;
+      // 内部名→内部名も登録（既に内部名で渡されてもOKにする）
+      map[col.name] = col.name;
+    }
+  }
+  spColumnMaps[listName] = map;
+  console.log(`[SP] ${listName} 列マッピング構築:`, map);
+  return map;
+}
+
+async function translateFields(listName, fields) {
+  const map = await getListColumns(listName);
+  if (!map) {
+    console.warn(`[SP] ${listName} のマッピング無し、フィールド名そのまま使用`);
+    return fields;
+  }
+  const translated = {};
+  for (const key of Object.keys(fields)) {
+    // 表示名でヒットすれば内部名に翻訳、ヒットしなければそのまま（システムフィールドのため）
+    const internal = map[key] || key;
+    translated[internal] = fields[key];
+    if (internal !== key) {
+      console.log(`[SP翻訳] ${key} → ${internal}`);
+    }
+  }
+  return translated;
 }
 
 // 🔧【v9】SharePoint診断機能（リダイレクトを絶対に起こさない安全版）
@@ -1454,7 +1503,14 @@ async function diagnoseSp() {
 
     // 3. トークンスコープ解析
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
+      // 🔧【v10】base64url → base64 変換してから atob
+      let b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const raw = atob(b64);
+      // UTF-8対応
+      let jsonStr;
+      try { jsonStr = decodeURIComponent(escape(raw)); } catch(_) { jsonStr = raw; }
+      const payload = JSON.parse(jsonStr);
       const scopes = payload.scp || '(なし)';
       const aud = payload.aud || '(不明)';
       const hasGraphSites = /Sites\.\w+\.All/i.test(scopes);
@@ -1515,6 +1571,34 @@ async function diagnoseSp() {
     // 7. テスト書き込み（利用者マスタがある場合のみ）
     if (listNames.includes('利用者マスタ')) {
       const targetList = allLists.value.find(l => l.displayName === '利用者マスタ');
+
+      // 🔧【v10】列定義の取得・表示
+      try {
+        const colRes = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteData.id}/lists/${targetList.id}/columns?$top=200`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (colRes.ok) {
+          const colData = await colRes.json();
+          const userCols = colData.value.filter(c => !c.readOnly && !c.hidden && c.name !== 'Title' && !['ID','Modified','Created','ContentType','Attachments','Edit','LinkTitle','LinkTitleNoMenu','DocIcon','ItemChildCount','FolderChildCount','_UIVersionString','_ComplianceFlags','_ComplianceTag','_ComplianceTagWrittenTime','_ComplianceTagUserId','AppAuthor','AppEditor'].includes(c.name));
+          const colList = userCols.map(c => `${c.displayName} → ${c.name}`).join('\n');
+          add('7. 利用者マスタの列定義', userCols.length > 0,
+            `(${userCols.length}個のユーザー列)\n${colList || '(列なし)'}`);
+
+          // 期待するフィールドが存在するかチェック
+          const expectedDisplays = ['カテゴリ', '施設居宅名', 'ステータス', '担当者', '開始年月', '担当処理', '事務処理', '契約確認', '振替入力', 'メモ伝達事項', '家族情報', '備考'];
+          const actualDisplays = colData.value.map(c => c.displayName);
+          const missing = expectedDisplays.filter(n => !actualDisplays.includes(n));
+          add('8. 必要な列の存在チェック', missing.length === 0,
+            missing.length === 0 ? '✅ 全列存在'
+            : `❌ 不足: ${missing.join(', ')}\n→ SharePoint「利用者マスタ」にこれらの列を作成してください`);
+        } else {
+          add('7. 列定義の取得', false, `${colRes.status}: 失敗`);
+        }
+      } catch(e) {
+        add('7. 列定義の取得', false, e.message);
+      }
+
+      // テスト書き込み（最小限のTitleのみ）
       try {
         const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteData.id}/lists/${targetList.id}/items`, {
           method: 'POST',
@@ -1523,15 +1607,15 @@ async function diagnoseSp() {
         });
         if (res.ok) {
           const data = await res.json();
-          add('7. テスト書き込み', true,
-            `✅ 書込成功 ID=${data.id}（後でSharePointから手動削除してください）`);
+          add('9. テスト書き込み', true,
+            `✅ 書込成功 ID=${data.id}（SharePointから手動削除してください）`);
         } else {
           const errText = await res.text().catch(()=>'');
-          add('7. テスト書き込み', false,
+          add('9. テスト書き込み', false,
             `❌ ${res.status}: ${errText.slice(0,300)}`);
         }
       } catch(e) {
-        add('7. テスト書き込み', false, '❌ ' + e.message);
+        add('9. テスト書き込み', false, '❌ ' + e.message);
       }
     }
   } catch(e) {
@@ -1940,7 +2024,7 @@ async function onMSAuthSuccess(account) {
 // 🔧 早期ブートストラップ（ヘッダー側のスクリプト）と協調動作
 // DOMContentLoaded で動かす（window.onload より早い）
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('[記録管理システム] build: v9-diag / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
+  console.log('[記録管理システム] build: v10-fieldmap / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
 
   // 🔧 file://ならエラー画面が出ている → 以降何もしない
   if (IS_FILE_PROTOCOL) return;
