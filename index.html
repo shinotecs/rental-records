@@ -338,33 +338,51 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-title">🏥 記録管理システム</div>
   <div class="ls-sub">福祉用具　記録管理</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
-  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v7-redirect</div>
+  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v8-stable</div>
 </div>
 
 <!-- 🔧【最重要】MSALに依存しない早期ブートストラップ -->
 <!-- このスクリプトはMSAL CDNより先に実行され、ローディング画面を確実に消す -->
 <script>
 (function(){
-  // 800ms後に必ずローディング画面を隠してログイン画面を表示（MSALの状態に関係なく）
+  // 🔧【v8】タイマーを保持してログイン成功時にキャンセル可能にする
+  var bootstrapTimers = [];
+
   function showLoginScreen() {
     try {
+      // 🔧 既にログイン済み or ログイン処理中なら何もしない（5秒タイマー暴発防止）
+      if (window.__loggedIn) {
+        console.log('[bootstrap] ログイン済みのためスキップ');
+        return;
+      }
+      // 🔧 リダイレクト戻り中（URLに#code=や#state=がある）もスキップ
+      if (window.location.hash && /[#&](code|state|error)=/.test(window.location.hash)) {
+        console.log('[bootstrap] MSAL redirect処理中のためスキップ');
+        return;
+      }
       var ls = document.getElementById('loading-screen');
       var lg = document.getElementById('login-screen');
       if (ls) ls.style.display = 'none';
-      if (lg && !window.__currentUser) lg.style.display = 'block';
+      if (lg) lg.style.display = 'block';
     } catch(e) { console.error('bootstrap切替エラー:', e); }
   }
-  // DOM準備完了したらタイマー起動
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function(){
-      setTimeout(showLoginScreen, 800);
-    });
-  } else {
-    setTimeout(showLoginScreen, 800);
+  function start() {
+    // 通常時：800ms後にログイン画面表示
+    bootstrapTimers.push(setTimeout(showLoginScreen, 800));
+    // 最終防衛線：8秒後（5秒→8秒に延長、MSALリダイレクト処理時間を確保）
+    bootstrapTimers.push(setTimeout(showLoginScreen, 8000));
   }
-  // 最終防衛線：5秒後にも強制実行
-  setTimeout(showLoginScreen, 5000);
-  // グローバル公開（後段スクリプトから利用）
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+  // 🔧 ログイン成功時に全タイマーをキャンセルする関数（後段から呼ぶ）
+  window.__cancelBootstrapTimers = function() {
+    bootstrapTimers.forEach(function(t){ clearTimeout(t); });
+    bootstrapTimers = [];
+    console.log('[bootstrap] 全タイマーキャンセル完了');
+  };
   window.__forceShowLogin = showLoginScreen;
 })();
 </script>
@@ -388,7 +406,7 @@ tr:hover td { background: var(--gray-50); }
           サインインで詰まった場合：セッションクリアして再試行
         </a>
       </div>
-      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v7-redirect</div>
+      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v8-stable</div>
     </div>
   </div>
 </div>
@@ -1791,6 +1809,11 @@ async function onMSAuthSuccess(account) {
     if (btn) { btn.disabled = false; btn.textContent = '🔑 Microsoftでサインイン'; }
     return;
   }
+  // 🔧【v8】ログイン成功フラグを立てて、ブートストラップタイマーをキャンセル
+  // （これをやらないと5秒/8秒後にブートストラップが「未ログイン」と誤判断して login画面を強制表示してしまう）
+  window.__loggedIn = true;
+  if (window.__cancelBootstrapTimers) window.__cancelBootstrapTimers();
+
   currentUser = staff.name;
   currentRole = staff.role;
   currentPerms = {
@@ -1801,14 +1824,16 @@ async function onMSAuthSuccess(account) {
   document.getElementById('current-user').textContent = staff.fullname || staff.name;
   document.getElementById('current-role').textContent = currentRole;
   document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('loading-screen').style.display = 'none'; // 念のため
   document.getElementById('admin-menu').style.display = currentPerms.canAdmin ? 'block' : 'none';
+  console.log('[Auth] ログイン完了:', staff.name);
   await initApp();
 }
 
 // 🔧 早期ブートストラップ（ヘッダー側のスクリプト）と協調動作
 // DOMContentLoaded で動かす（window.onload より早い）
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('[記録管理システム] build: v7-redirect / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
+  console.log('[記録管理システム] build: v8-stable / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
 
   // 🔧 file://ならエラー画面が出ている → 以降何もしない
   if (IS_FILE_PROTOCOL) return;
@@ -2223,6 +2248,7 @@ function logout() {
   // Microsoftアカウントからもサインアウト
   const accounts = msalInstance.getAllAccounts();
   currentUser = null; currentRole = null; spToken = null;
+  window.__loggedIn = false; // 🔧【v8】ログイン状態フラグもクリア
   if (accounts.length > 0) {
     // 🔧【v7】全クライアントでリダイレクト方式（COOP問題回避）
     msalInstance.logoutRedirect({ account: accounts[0] }).catch(() => {});
