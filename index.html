@@ -338,7 +338,7 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-title">🏥 記録管理システム</div>
   <div class="ls-sub">福祉用具　記録管理</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
-  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v11-readwrite</div>
+  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v12-savefix</div>
 </div>
 
 <!-- 🔧【最重要】MSALに依存しない早期ブートストラップ -->
@@ -406,7 +406,7 @@ tr:hover td { background: var(--gray-50); }
           サインインで詰まった場合：セッションクリアして再試行
         </a>
       </div>
-      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v11-readwrite</div>
+      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v12-savefix</div>
     </div>
   </div>
 </div>
@@ -2045,7 +2045,7 @@ async function onMSAuthSuccess(account) {
 // 🔧 早期ブートストラップ（ヘッダー側のスクリプト）と協調動作
 // DOMContentLoaded で動かす（window.onload より早い）
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('[記録管理システム] build: v11-readwrite / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
+  console.log('[記録管理システム] build: v12-savefix / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
 
   // 🔧 file://ならエラー画面が出ている → 以降何もしない
   if (IS_FILE_PROTOCOL) return;
@@ -3142,32 +3142,46 @@ async function saveUser() {
     家族情報: data.family,
     備考: data.biko,
   };
+  // 🔧【v12】保存ボタンを無効化＋二重送信防止
+  const saveBtn = document.querySelector('#modal-user .btn-primary, #modal-user button[onclick*="saveUser"]');
+  if (saveBtn) { saveBtn.disabled = true; }
   showToast('保存中...', 'success');
-  if (editingId) {
-    const u = DB.users.find(u=>u.id===editingId);
-    if (u && u.spId) {
-      await updateListItem('利用者マスタ', u.spId, spFields);
-    }
-    Object.assign(u, data);
-    addUpdateLog('user', u.id, u.name, '更新');
-    showToast('利用者情報を更新しました', 'success');
-  } else {
-    const result = await addListItem('利用者マスタ', spFields);
-    if (result) {
-      data.id = result.id; data.spId = result.id;
-      DB.users.push(data);
-      addUpdateLog('user', data.id, data.name, '新規登録');
-      showToast('利用者を追加しました', 'success');
+  try {
+    if (editingId) {
+      const u = DB.users.find(u=>u.id===editingId);
+      if (u && u.spId) {
+        await updateListItem('利用者マスタ', u.spId, spFields);
+      }
+      if (u) Object.assign(u, data);
+      try { addUpdateLog('user', editingId, data.name, '更新'); } catch(e){ console.warn(e); }
+      showToast('利用者情報を更新しました', 'success');
     } else {
-      data.id = DB.nextIds.user++;
-      DB.users.push(data);
-      addUpdateLog('user', data.id, data.name, '新規登録');
-      showToast('利用者を追加しました（ローカル）', 'success');
+      const result = await addListItem('利用者マスタ', spFields);
+      if (result) {
+        data.id = result.id; data.spId = result.id;
+        DB.users.push(data);
+        try { addUpdateLog('user', data.id, data.name, '新規登録'); } catch(e){ console.warn(e); }
+        showToast('利用者を追加しました ✅', 'success');
+      } else {
+        data.id = DB.nextIds.user++;
+        DB.users.push(data);
+        try { addUpdateLog('user', data.id, data.name, '新規登録'); } catch(e){ console.warn(e); }
+        // 🔧 ローカル保存は警告として目立たせる
+        showToast('⚠️ SharePoint保存に失敗。ローカルのみ保存（SP診断で原因確認を）', 'error');
+      }
     }
+  } catch(e) {
+    console.error('saveUser error:', e);
+    showToast('保存エラー: ' + (e.message || e), 'error');
+  } finally {
+    // 🔧【v12】成功・失敗・エラーいずれでも必ずモーダルを閉じる
+    if (saveBtn) saveBtn.disabled = false;
+    closeModal('modal-user');
+    try { renderDashboard(); } catch(e){ console.warn('renderDashboard:', e); }
+    try {
+      renderUsers(data.category==='在宅'?'home':data.category==='施設'?'facility':'corporate');
+    } catch(e){ console.warn('renderUsers:', e); }
   }
-  closeModal('modal-user');
-  renderDashboard();
-  renderUsers(data.category==='在宅'?'home':data.category==='施設'?'facility':'corporate');
 }
 
 function deleteUser(id) {
@@ -3235,19 +3249,28 @@ async function saveMemo() {
     メモ内容: content,
   };
   showToast('保存中...', 'success');
-  const result = await addListItem('営業メモ', spFields);
-  if (result) {
-    data.id = result.id; data.spId = result.id;
-    addUpdateLog('memo', data.userId, data.content?.slice(0,15)||'メモ', '新規登録');
-    showToast('メモを追加しました', 'success');
-  } else {
-    data.id = DB.nextIds.memo++;
-    addUpdateLog('memo', data.userId, data.content?.slice(0,15)||'メモ', '新規登録');
-    showToast('メモを追加しました（ローカル）', 'success');
+  const memoBtn = document.querySelector('#modal-memo button[onclick*="saveMemo"]');
+  if (memoBtn) memoBtn.disabled = true;
+  try {
+    const result = await addListItem('営業メモ', spFields);
+    if (result) {
+      data.id = result.id; data.spId = result.id;
+      try { addUpdateLog('memo', data.userId, data.content?.slice(0,15)||'メモ', '新規登録'); } catch(e){}
+      showToast('メモを追加しました ✅', 'success');
+    } else {
+      data.id = DB.nextIds.memo++;
+      try { addUpdateLog('memo', data.userId, data.content?.slice(0,15)||'メモ', '新規登録'); } catch(e){}
+      showToast('⚠️ SharePoint保存に失敗。ローカルのみ保存', 'error');
+    }
+    DB.memos.push(data);
+  } catch(e) {
+    console.error('saveMemo error:', e);
+    showToast('保存エラー: ' + (e.message || e), 'error');
+  } finally {
+    if (memoBtn) memoBtn.disabled = false;
+    closeModal('modal-memo');
+    try { renderMemos(); renderDashboard(); } catch(e){ console.warn(e); }
   }
-  DB.memos.push(data);
-  closeModal('modal-memo');
-  renderMemos(); renderDashboard();
 }
 
 function deleteMemo(id) {
@@ -3319,27 +3342,36 @@ async function saveOrder() {
     備考: data.biko,
   };
   showToast('保存中...', 'success');
-  if (editingId) {
-    const o = DB.orders.find(o=>o.id===editingId);
-    if (o && o.spId) await updateListItem('商品レンタル', o.spId, spFields);
-    Object.assign(o, data);
-    addUpdateLog('order', o.userId, o.product||'受注', '更新');
-    showToast('受注情報を更新しました', 'success');
-  } else {
-    const result = await addListItem('商品レンタル', spFields);
-    if (result) {
-      data.id = result.id; data.spId = result.id;
-      addUpdateLog('order', data.userId, data.product||'受注', '新規登録');
-      showToast('受注を追加しました', 'success');
+  const orderBtn = document.querySelector('#modal-order button[onclick*="saveOrder"]');
+  if (orderBtn) orderBtn.disabled = true;
+  try {
+    if (editingId) {
+      const o = DB.orders.find(o=>o.id===editingId);
+      if (o && o.spId) await updateListItem('商品レンタル', o.spId, spFields);
+      if (o) Object.assign(o, data);
+      try { addUpdateLog('order', data.userId, data.product||'受注', '更新'); } catch(e){}
+      showToast('受注情報を更新しました', 'success');
     } else {
-      data.id = DB.nextIds.order++;
-      addUpdateLog('order', data.userId, data.product||'受注', '新規登録');
-      showToast('受注を追加しました（ローカル）', 'success');
+      const result = await addListItem('商品レンタル', spFields);
+      if (result) {
+        data.id = result.id; data.spId = result.id;
+        try { addUpdateLog('order', data.userId, data.product||'受注', '新規登録'); } catch(e){}
+        showToast('受注を追加しました ✅', 'success');
+      } else {
+        data.id = DB.nextIds.order++;
+        try { addUpdateLog('order', data.userId, data.product||'受注', '新規登録'); } catch(e){}
+        showToast('⚠️ SharePoint保存に失敗。ローカルのみ保存', 'error');
+      }
+      DB.orders.push(data);
     }
-    DB.orders.push(data);
+  } catch(e) {
+    console.error('saveOrder error:', e);
+    showToast('保存エラー: ' + (e.message || e), 'error');
+  } finally {
+    if (orderBtn) orderBtn.disabled = false;
+    closeModal('modal-order');
+    try { renderOrders(); renderDashboard(); } catch(e){ console.warn(e); }
   }
-  closeModal('modal-order');
-  renderOrders(); renderDashboard();
 }
 
 function openEditOrder(id) {
@@ -3396,11 +3428,11 @@ function updateSaleUserList(presetUserId) {
 
 document.getElementById('s-category').addEventListener('change', ()=>updateSaleUserList());
 
-function saveSale() {
+async function saveSale() {
   const product = document.getElementById('s-product').value.trim();
   if (!product) { showToast('商品・内容は必須です', 'error'); return; }
+  const u = DB.users.find(x=>x.id===parseInt(document.getElementById('s-user').value) || x.id===document.getElementById('s-user').value);
   const data = {
-    id: DB.nextIds.sale++,
     userId: parseInt(document.getElementById('s-user').value),
     category: document.getElementById('s-category').value,
     staff: document.getElementById('s-staff').value,
@@ -3410,17 +3442,49 @@ function saveSale() {
     end: document.getElementById('s-end').value,
     biko: document.getElementById('s-biko').value,
   };
-  if (editingId) {
-    Object.assign(DB.sales.find(s=>s.id===editingId), data);
-    addUpdateLog('sale', s.userId, s.product||'販売', '更新');
-    showToast('販売情報を更新しました', 'success');
-  } else {
-    DB.sales.push(data);
-    addUpdateLog('sale', data.userId, data.product||'販売', '新規登録');
-    showToast('販売を追加しました', 'success');
+  const spFields = {
+    Title: product,
+    利用者名: u ? u.name : '',
+    カテゴリ: data.category,
+    担当者: data.staff,
+    ステータス: data.status,
+    商品内容: product,
+    金額税込: data.amount ? Number(data.amount) : null,
+    納品日: data.start || null,
+    確認日: data.end || null,
+    備考: data.biko,
+  };
+  showToast('保存中...', 'success');
+  const saleBtn = document.querySelector('#modal-sale button[onclick*="saveSale"]');
+  if (saleBtn) saleBtn.disabled = true;
+  try {
+    if (editingId) {
+      const s = DB.sales.find(x=>x.id===editingId);
+      if (s && s.spId) await updateListItem('販売改修', s.spId, spFields);
+      if (s) Object.assign(s, data);
+      try { addUpdateLog('sale', data.userId, data.product||'販売', '更新'); } catch(e){}
+      showToast('販売情報を更新しました', 'success');
+    } else {
+      const result = await addListItem('販売改修', spFields);
+      if (result) {
+        data.id = result.id; data.spId = result.id;
+        try { addUpdateLog('sale', data.userId, data.product||'販売', '新規登録'); } catch(e){}
+        showToast('販売を追加しました ✅', 'success');
+      } else {
+        data.id = DB.nextIds.sale++;
+        try { addUpdateLog('sale', data.userId, data.product||'販売', '新規登録'); } catch(e){}
+        showToast('⚠️ SharePoint保存に失敗。ローカルのみ保存', 'error');
+      }
+      DB.sales.push(data);
+    }
+  } catch(e) {
+    console.error('saveSale error:', e);
+    showToast('保存エラー: ' + (e.message || e), 'error');
+  } finally {
+    if (saleBtn) saleBtn.disabled = false;
+    closeModal('modal-sale');
+    try { renderSales(); renderDashboard(); } catch(e){ console.warn(e); }
   }
-  closeModal('modal-sale');
-  renderSales(); renderDashboard();
 }
 
 function openEditSale(id) {
