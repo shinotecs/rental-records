@@ -338,7 +338,7 @@ tr:hover td { background: var(--gray-50); }
   <div class="ls-title">🏥 記録管理システム</div>
   <div class="ls-sub">福祉用具　記録管理</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
-  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v10-fieldmap</div>
+  <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v11-readwrite</div>
 </div>
 
 <!-- 🔧【最重要】MSALに依存しない早期ブートストラップ -->
@@ -406,7 +406,7 @@ tr:hover td { background: var(--gray-50); }
           サインインで詰まった場合：セッションクリアして再試行
         </a>
       </div>
-      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v10-fieldmap</div>
+      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v11-readwrite</div>
     </div>
   </div>
 </div>
@@ -1700,74 +1700,87 @@ async function deleteListItem(listName, itemId) {
 }
 
 // SP → ローカルDB変換
+// 🔧【v11】列マッピングを使ったフィールド読み取りヘルパー
+// SharePointの内部名がfield_1等の場合でも、表示名でアクセス可能にする
+function spReadField(listName, item, displayName) {
+  const map = spColumnMaps[listName];
+  const internal = map ? (map[displayName] || displayName) : displayName;
+  return item.fields[internal] || '';
+}
+
 function spUserToLocal(item) {
-  const f = item.fields;
+  const get = (n) => spReadField('利用者マスタ', item, n);
   return {
     id: item.id,
     spId: item.id,
-    category: f.カテゴリ || '',
-    name: f.Title || '',
-    org: f.施設居宅名 || '',
-    status: f.ステータス || '',
-    staff: f.担当者 || '',
-    tantou: f.担当処理 || '',
-    jimu: f.事務処理 || '',
-    keiyaku: f.契約確認 || '',
-    furikae: f.振替入力 || '',
-    start: f.開始年月 || '',
-    memo: f.メモ伝達事項 || '',
-    family: f.家族情報 || '',
-    biko: f.備考 || '',
+    category: get('カテゴリ'),
+    name: item.fields.Title || '',
+    org: get('施設居宅名'),
+    status: get('ステータス'),
+    staff: get('担当者'),
+    tantou: get('担当処理'),
+    jimu: get('事務処理'),
+    keiyaku: get('契約確認'),
+    furikae: get('振替入力'),
+    start: get('開始年月'),
+    memo: get('メモ伝達事項'),
+    family: get('家族情報'),
+    biko: get('備考'),
   };
 }
 
 function spMemoToLocal(item) {
-  const f = item.fields;
+  const get = (n) => spReadField('営業メモ', item, n);
+  const dateRaw = get('日付');
   return {
     id: item.id, spId: item.id,
-    userId: f.利用者名 || '',
-    category: f.カテゴリ || '',
-    staff: f.担当者 || '',
-    tantou: f.担当処理 || '',
-    jimu: f.事務処理 || '',
-    date: f.日付 ? f.日付.slice(0,10) : '',
-    content: f.メモ内容 || '',
+    userId: get('利用者名'),
+    category: get('カテゴリ'),
+    staff: get('担当者'),
+    tantou: get('担当処理'),
+    jimu: get('事務処理'),
+    date: dateRaw ? String(dateRaw).slice(0,10) : '',
+    content: get('メモ内容'),
   };
 }
 
 function spOrderToLocal(item) {
-  const f = item.fields;
+  const get = (n) => spReadField('商品レンタル', item, n);
+  const startRaw = get('納品日');
+  const endRaw = get('回収日');
   return {
     id: item.id, spId: item.id,
-    userId: f.利用者名 || '',
-    category: f.カテゴリ || '',
-    staff: f.担当者 || '',
-    status: f.ステータス || '',
-    product: f.商品名型番 || '',
-    unit: f.単価 || '',
-    start: f.納品日 ? f.納品日.slice(0,10) : '',
-    end: f.回収日 ? f.回収日.slice(0,10) : '',
-    tantou: f.担当処理 || '',
-    jimu: f.事務処理 || '',
-    deliver: f.納品確認 || '',
-    collect: f.回収確認 || '',
-    biko: f.備考 || '',
+    userId: get('利用者名'),
+    category: get('カテゴリ'),
+    staff: get('担当者'),
+    status: get('ステータス'),
+    product: get('商品名型番'),
+    unit: get('単価'),
+    start: startRaw ? String(startRaw).slice(0,10) : '',
+    end: endRaw ? String(endRaw).slice(0,10) : '',
+    tantou: get('担当処理'),
+    jimu: get('事務処理'),
+    deliver: get('納品確認'),
+    collect: get('回収確認'),
+    biko: get('備考'),
   };
 }
 
 function spSaleToLocal(item) {
-  const f = item.fields;
+  const get = (n) => spReadField('販売改修', item, n);
+  const startRaw = get('納品日');
+  const endRaw = get('確認日');
   return {
     id: item.id, spId: item.id,
-    userId: f.利用者名 || '',
-    category: f.カテゴリ || '',
-    staff: f.担当者 || '',
-    status: f.ステータス || '',
-    product: f.商品内容 || '',
-    amount: f.金額税込 || '',
-    start: f.納品日 ? f.納品日.slice(0,10) : '',
-    end: f.確認日 ? f.確認日.slice(0,10) : '',
-    biko: f.備考 || '',
+    userId: get('利用者名'),
+    category: get('カテゴリ'),
+    staff: get('担当者'),
+    status: get('ステータス'),
+    product: get('商品内容'),
+    amount: get('金額税込'),
+    start: startRaw ? String(startRaw).slice(0,10) : '',
+    end: endRaw ? String(endRaw).slice(0,10) : '',
+    biko: get('備考'),
   };
 }
 
@@ -1775,6 +1788,14 @@ function spSaleToLocal(item) {
 async function loadFromSharePoint() {
   showToast('SharePointからデータを読み込み中...', 'success');
   try {
+    // 🔧【v11】まず4リストの列マッピングを取得してキャッシュに入れる
+    // （sp*ToLocal が同期的にマッピング参照するため）
+    await Promise.all([
+      getListColumns('利用者マスタ'),
+      getListColumns('営業メモ'),
+      getListColumns('商品レンタル'),
+      getListColumns('販売改修'),
+    ]);
     const [users, memos, orders, sales] = await Promise.all([
       getListItems('利用者マスタ'),
       getListItems('営業メモ'),
@@ -2024,7 +2045,7 @@ async function onMSAuthSuccess(account) {
 // 🔧 早期ブートストラップ（ヘッダー側のスクリプト）と協調動作
 // DOMContentLoaded で動かす（window.onload より早い）
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('[記録管理システム] build: v10-fieldmap / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
+  console.log('[記録管理システム] build: v11-readwrite / protocol:', window.location.protocol, '/ MSAL ready:', typeof msal);
 
   // 🔧 file://ならエラー画面が出ている → 以降何もしない
   if (IS_FILE_PROTOCOL) return;
