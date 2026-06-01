@@ -5,15 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>記録管理システム</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&family=Fraunces:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
 <!-- Loading Screen -->
 <div id="loading-screen">
-  <div class="ls-title">🏥 記録管理システム</div>
-  <div class="ls-sub">福祉用具　記録管理</div>
+  <div class="ls-title">シノテクス　記録管理システム</div>
+  <div class="ls-sub">Welfare Equipment Records</div>
   <div class="ls-bar"><div class="ls-bar-fill"></div></div>
   <div style="position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,0.6);">build: v12-savefix</div>
 </div>
@@ -66,24 +67,25 @@
 
 <!-- Login Screen (Microsoft認証中の待機画面) -->
 <div id="login-screen" style="display:none;">
-  <div style="position:fixed;inset:0;background:linear-gradient(135deg,var(--primary-dark),var(--primary));display:flex;align-items:center;justify-content:center;">
-    <div style="background:white;border-radius:12px;padding:40px;text-align:center;width:360px;box-shadow:0 4px 24px rgba(0,0,0,0.2);">
-      <div style="font-size:40px;margin-bottom:12px;">🏥</div>
-      <div style="font-size:20px;font-weight:700;color:var(--primary);margin-bottom:4px;">記録管理システム</div>
-      <div style="font-size:13px;color:var(--gray-500);margin-bottom:24px;">福祉用具　記録管理</div>
-      <div style="font-size:13px;color:var(--gray-600);margin-bottom:20px;">Microsoftアカウントでサインインしてください</div>
+  <div style="position:fixed;inset:0;background:var(--bg-base, #FAF7F2);display:flex;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:12px;padding:48px 44px;text-align:center;width:380px;box-shadow:0 8px 24px rgba(15,23,42,0.10),0 2px 6px rgba(15,23,42,0.06);border:1px solid #E5DFD2;">
+      <div style="font-family:'Fraunces',serif;font-style:italic;font-size:11px;color:#A39B8E;letter-spacing:0.14em;margin-bottom:14px;text-transform:uppercase;">Shinotecs</div>
+      <div style="font-family:'Shippori Mincho B1',serif;font-size:20px;font-weight:600;color:#0F172A;letter-spacing:0.06em;margin-bottom:4px;">記録管理システム</div>
+      <div style="font-family:'Fraunces',serif;font-style:italic;font-size:12px;color:#A39B8E;letter-spacing:0.1em;margin-bottom:32px;">Welfare Equipment Records</div>
+      <div style="width:32px;height:1px;background:#E5DFD2;margin:0 auto 28px;"></div>
+      <div style="font-size:13px;color:#6B6B66;margin-bottom:20px;font-family:'Noto Sans JP',sans-serif;line-height:1.7;">Microsoftアカウントでサインインしてください</div>
       <div style="margin-top:8px;">
-        <button onclick="doMSLogin()" style="width:100%;padding:11px;background:var(--primary);color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
-          🔑 Microsoftでサインイン
+        <button onclick="doMSLogin()" style="width:100%;padding:12px;background:#0F172A;color:white;border:none;border-radius:999px;font-size:14px;font-weight:500;cursor:pointer;font-family:'Noto Sans JP',sans-serif;letter-spacing:0.04em;transition:background 0.15s;">
+          Microsoftでサインイン
         </button>
       </div>
-      <div id="login-error" style="margin-top:12px;font-size:12px;color:var(--danger);display:none;word-break:break-all;text-align:left;"></div>
-      <div style="margin-top:14px;">
-        <a href="#" onclick="clearSessionAndReload();return false;" style="font-size:11px;color:var(--gray-500);text-decoration:underline;">
+      <div id="login-error" style="margin-top:14px;font-size:12px;color:#B03A2E;display:none;word-break:break-all;text-align:left;background:#FAEAEA;padding:10px 12px;border-radius:8px;"></div>
+      <div style="margin-top:18px;">
+        <a href="#" onclick="clearSessionAndReload();return false;" style="font-size:11px;color:#A39B8E;text-decoration:none;border-bottom:1px solid #E5DFD2;padding-bottom:1px;font-family:'Noto Sans JP',sans-serif;">
           サインインで詰まった場合：セッションクリアして再試行
         </a>
       </div>
-      <div style="margin-top:16px;font-size:10px;color:var(--gray-400);">build: v12-savefix</div>
+      <div style="margin-top:20px;font-family:'Fraunces',serif;font-style:italic;font-size:10px;color:#BEA688;">build: v12-savefix</div>
     </div>
   </div>
 </div>
@@ -91,7 +93,7 @@
 <!-- Header -->
 <div id="header">
   <button id="menu-toggle" onclick="toggleSidebar()">☰</button>
-  <div class="logo" onclick="showPage('dashboard')" style="cursor:pointer;" title="ダッシュボードへ">🏥 記録管理システム <span>福祉用具　記録管理</span></div>
+  <div class="logo" onclick="showPage('dashboard')" style="cursor:pointer;" title="ダッシュボードへ">シノテクス　記録管理 <span>Welfare Equipment Records</span></div>
   <div class="header-btns" style="display:flex;align-items:center;gap:8px;">
     <div style="position:relative;">
       <input id="global-search-input" type="text" placeholder="🔍 全体検索..."
