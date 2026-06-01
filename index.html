@@ -395,7 +395,7 @@
     <div class="page-header">
       <div class="page-title">⚙️ マスタ設定</div>
     </div>
-    <div class="settings-grid" id="settings-content"></div>
+    <div id="settings-content"></div>
   </div>
 
   <!-- Users Admin -->
@@ -681,7 +681,8 @@
         </div>
         <div class="form-group full">
           <label>商品名・内容<span class="req">*</span></label>
-          <input id="s-product" type="text" placeholder="例：手摺の取り付け　3ヶ所">
+          <input id="s-product" type="text" list="sale-product-list" placeholder="例：手摺の取り付け　3ヶ所">
+          <datalist id="sale-product-list"></datalist>
         </div>
         <div class="form-group">
           <label>納品日</label>

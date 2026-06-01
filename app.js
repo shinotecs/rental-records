@@ -15,6 +15,9 @@ let DB = {
     facilities: ['鶴ヶ島 ほほえみの郷','イリーゼ入間','イリーゼ新所沢','イリーゼ狭山','イリーゼ狭山入曽はなれ','イリーゼ所沢西','イリーゼ武蔵藤沢','福寿の里','イリーゼ狭山富士見'],
     kyotaku: ['ピオ','さわやかケアプラン','ニチイケアセンター','居宅A','居宅B'],
     products: ['ｾｰﾌﾃｨｰｱｰﾑｳｫｰｶｰ Cﾀｲﾌﾟ SAWCR','室内用歩行器 アヴァンス PAセット','アルコー１Ｓ R100415','ｽﾃｲﾔｰ自走SY22-40SB','ｴｱﾏｽﾀｰ ﾈｸｻｽR 91cm RCR-663','ｼﾝﾌｫﾆｰｽﾘﾑ RSMA4-0040','グレイスコアマルチ自走42幅 RGRC-31B-42','ﾍﾞｯﾄﾞｻｲﾄﾞﾃｰﾌﾞﾙ RKF-1920','車ｲｽ 介助式 スキット7 RSKT-7','ｴｱﾏｯﾄ標準','電動ベッド','サイドレール'],
+    productsSales: ['手摺の取り付け','住宅改修セット（スロープ＋手摺）','シューズ型歩行補助具','一般販売品'],
+    productsRentalBuy: [],
+    productsSalesBuy: [],
   },
   users: [
     {id:1,category:'在宅',name:'齊藤 京子',org:'ピオ',status:'利用中',staff:'篠',tantou:'完了',jimu:'対応中',keiyaku:'完了',furikae:'要確認',start:'2026-05-01',memo:'娘さん同居？別居？\nマンション横にP可能。\n本人訪問されるのが好きじゃない',family:'',biko:''},
@@ -1184,10 +1187,19 @@ function populateStaffDatalist() {
   dl.innerHTML = DB.staff.map(s=>`<option value="${s.name}">`).join('');
 }
 
-function populateProductDatalist() {
+function populateProductDatalist(type) {
   const dl = document.getElementById('product-list');
-  if (!dl) return; // 🔧 datalistが存在しない場合はスキップ
-  dl.innerHTML = DB.masters.products.map(p=>`<option value="${p}">`).join('');
+  if (!dl) return;
+  // type: 'rental'(デフォルト) or 'sales'
+  const list = (type === 'sales') ? DB.masters.productsSales : DB.masters.products;
+  dl.innerHTML = list.map(p=>`<option value="${p}">`).join('');
+}
+
+// 販売モーダル用datalist（別のdatalist id: sale-product-list を使う）
+function populateSaleProductDatalist() {
+  const dl = document.getElementById('sale-product-list');
+  if (!dl) return;
+  dl.innerHTML = DB.masters.productsSales.map(p=>`<option value="${p}">`).join('');
 }
 
 function populateStaffSelects() {
@@ -1437,6 +1449,7 @@ function deleteMemo(id) {
 function openAddOrderModal(userId) {
   editingId = null;
   populateStaffSelects();
+  populateProductDatalist('rental');
   document.getElementById('o-staff').value = currentUser || '';
   updateOrderUserList(userId);
   document.getElementById('o-product').value = '';
@@ -1560,6 +1573,7 @@ function deleteOrder(id) {
 function openAddSaleModal(userId) {
   editingId = null;
   populateStaffSelects();
+  populateSaleProductDatalist();
   document.getElementById('s-staff').value = currentUser || '';
   updateSaleUserList(userId);
   document.getElementById('s-product').value = '';
@@ -1666,47 +1680,84 @@ function deleteSale(id) {
 }
 
 // ======================== SETTINGS ========================
+// ======================== SETTINGS ========================
+// 現在アクティブなマスタタブ
+let currentSettingsTab = 'facilities';
+
 function renderSettings() {
-  const canEdit = currentPerms.canAdmin;
-  const masterKeys = [
-    {key:'facilities',label:'🏢 施設一覧'},
-    {key:'kyotaku',label:'🏠 居宅一覧'},
-    {key:'products',label:'📦 商品マスタ'},
-    {key:'statuses',label:'📋 ステータス'},
-    {key:'statuses2',label:'💰 販売ステータス'},
+  const tabs = [
+    { key: 'facilities',       label: '施設一覧',           icon: '🏢' },
+    { key: 'kyotaku',          label: '居宅一覧',           icon: '🏠' },
+    { key: 'products',         label: '商品（レンタル）',   icon: '📦' },
+    { key: 'productsSales',    label: '商品（販売品）',     icon: '🛒' },
+    { key: 'productsRentalBuy',label: '仕入（レンタル）',   icon: '📋' },
+    { key: 'productsSalesBuy', label: '仕入（販売品）',     icon: '📋' },
+    { key: 'statuses',         label: 'レンタルステータス', icon: '🔖' },
+    { key: 'statuses2',        label: '販売ステータス',     icon: '💰' },
   ];
 
-  document.getElementById('settings-content').innerHTML = masterKeys.map(mk=>`
-    <div class="settings-card">
-      <div class="settings-card-header">${mk.label}</div>
-      <div class="settings-card-body">
-        <div id="master-list-${mk.key}">
-          ${DB.masters[mk.key].map((item,i)=>`
-            <div class="settings-item">
-              <span class="si-name">${item}</span>
-              ${canEdit?`<div class="si-actions">
-                <button class="btn btn-danger btn-sm btn-icon" onclick="removeMasterItem('${mk.key}',${i})">🗑</button>
-              </div>`:''}
-            </div>
-          `).join('')}
-        </div>
-        ${canEdit?`<div class="tag-input-wrap" id="add-wrap-${mk.key}">
-          <input type="text" placeholder="追加する項目名..." id="add-input-${mk.key}">
-          <button class="btn btn-primary btn-sm" onclick="addMasterItem('${mk.key}')">追加</button>
-        </div>`:''}
-        ${!canEdit?'<div style="font-size:12px;color:var(--gray-500);margin-top:8px;">※ 管理者のみ編集可能</div>':''}
-      </div>
+  const activeTab = tabs.find(t => t.key === currentSettingsTab) || tabs[0];
+  const canEdit = currentPerms.canAdmin;
+
+  // タブバー生成
+  const tabBar = tabs.map(t => `
+    <div class="stab ${t.key === currentSettingsTab ? 'active' : ''}"
+         onclick="switchSettingsTab('${t.key}')">
+      ${t.icon} ${t.label}
     </div>
   `).join('');
+
+  // リスト生成
+  const items = (DB.masters[activeTab.key] || []);
+  const listHtml = items.length === 0
+    ? `<div style="padding:16px;font-size:13px;color:var(--text-muted);">まだ登録がありません</div>`
+    : items.map((item, i) => `
+        <div class="settings-item">
+          <span class="si-name">${item}</span>
+          ${canEdit ? `<div class="si-actions">
+            <button class="btn btn-danger btn-sm btn-icon"
+              onclick="removeMasterItem('${activeTab.key}',${i})" title="削除">🗑</button>
+          </div>` : ''}
+        </div>
+      `).join('');
+
+  const addHtml = canEdit ? `
+    <div class="tag-input-wrap" id="add-wrap-${activeTab.key}">
+      <input type="text" placeholder="追加する項目名..." id="add-input-${activeTab.key}"
+        onkeydown="if(event.key==='Enter')addMasterItem('${activeTab.key}')">
+      <button class="btn btn-primary btn-sm" onclick="addMasterItem('${activeTab.key}')">追加</button>
+    </div>` : `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">※ 管理者のみ編集可能</div>`;
+
+  document.getElementById('settings-content').innerHTML = `
+    <div class="stab-bar">${tabBar}</div>
+    <div class="settings-card" style="border-top-left-radius:0;border-top-right-radius:0;margin-top:0;">
+      <div class="settings-card-header">
+        ${activeTab.icon} ${activeTab.label}
+        <span style="font-family:var(--font-num);font-style:italic;font-weight:400;color:var(--text-muted);font-size:11px;">${items.length} 件</span>
+      </div>
+      <div class="settings-card-body">
+        <div id="master-list-${activeTab.key}">${listHtml}</div>
+        ${addHtml}
+      </div>
+    </div>
+  `;
+}
+
+function switchSettingsTab(key) {
+  currentSettingsTab = key;
+  renderSettings();
 }
 
 function addMasterItem(key) {
   const inp = document.getElementById('add-input-'+key);
   const val = inp.value.trim();
   if (!val) return;
+  if (!DB.masters[key]) DB.masters[key] = [];
   if (DB.masters[key].includes(val)) { showToast('既に存在します', 'error'); return; }
   DB.masters[key].push(val);
-  populateProductDatalist();
+  // datalistを更新（レンタル・販売どちらのマスタが変わっても反映）
+  populateProductDatalist('rental');
+  populateSaleProductDatalist();
   inp.value = '';
   renderSettings();
   showToast('追加しました', 'success');
